@@ -1047,9 +1047,11 @@ name = "radar-a-chepers"
 version = "0.1.0"
 dependencies = [
  "bleps",
+ "cfg-if",
  "critical-section",
  "embassy-executor",
  "embassy-net",
+ "embassy-sync",
  "embassy-time",
  "embedded-io",
  "embedded-io-async",
@@ -1060,6 +1062,7 @@ dependencies = [
  "esp-println",
  "esp-wifi",
  "heapless",
+ "libm",
  "log",
  "smoltcp",
  "static_cell",
