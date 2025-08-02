@@ -1,9 +1,11 @@
+#![allow(dead_code)]
+
 const HEADER: [u8; 4] = [0xAA, 0xFF, 0x03, 0x00];
 const FOOTER: [u8; 2] = [0x55, 0xCC];
 const MAX_TARGETS: usize = 4;
 const TARGET_LENGTH: usize = 8;
 
-#[derive(Debug, defmt::Format)]
+#[derive(Debug)]
 struct Target {
     // X coordinate in mm
     x: i16,
@@ -53,12 +55,12 @@ fn parse_custom_i16(slice: &[u8]) -> i16 {
     }
 }
 
-#[derive(Debug, defmt::Format)]
+#[derive(Debug)]
 pub struct TargetsList {
     targets: [Option<Target>; HEADER.len()],
 }
 
-#[derive(Debug, defmt::Format)]
+#[derive(Debug)]
 pub enum TargetsListParseError {
     DataTooShort(usize),
     InvalidHeader([u8; HEADER.len()]),

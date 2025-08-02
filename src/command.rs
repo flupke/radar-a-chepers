@@ -1,14 +1,13 @@
 use core::ops::Deref;
 
-use embassy_sync::lazy_lock::LazyLock;
+use once_cell::sync::Lazy;
 
 pub const FRAME_HEADER: [u8; 4] = [0xFD, 0xFC, 0xFB, 0xFA];
 pub const FRAME_FOOTER: [u8; 4] = [0x04, 0x03, 0x02, 0x01];
-pub static OPEN_COMMAND_MODE: LazyLock<Frame> =
-    LazyLock::new(|| Frame::new(&[0xFF, 0x00, 0x01, 0x00]));
-pub static CLOSE_COMMAND_MODE: LazyLock<Frame> = LazyLock::new(|| Frame::new(&[0xFE, 0x00]));
-pub static SET_SINGLE_TARGET: LazyLock<Frame> = LazyLock::new(|| Frame::new(&[0x80, 0x00]));
-pub static SET_MULTI_TARGET: LazyLock<Frame> = LazyLock::new(|| Frame::new(&[0x90, 0x00]));
+pub static OPEN_COMMAND_MODE: Lazy<Frame> = Lazy::new(|| Frame::new(&[0xFF, 0x00, 0x01, 0x00]));
+pub static CLOSE_COMMAND_MODE: Lazy<Frame> = Lazy::new(|| Frame::new(&[0xFE, 0x00]));
+pub static SET_SINGLE_TARGET: Lazy<Frame> = Lazy::new(|| Frame::new(&[0x80, 0x00]));
+pub static SET_MULTI_TARGET: Lazy<Frame> = Lazy::new(|| Frame::new(&[0x90, 0x00]));
 
 pub struct Frame {
     // General frame structure:
