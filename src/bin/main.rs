@@ -1,129 +1,151 @@
-use esp_idf_hal::delay::TickType;
-use esp_idf_hal::delay::BLOCK;
-use esp_idf_hal::gpio;
-use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_hal::prelude::*;
-use esp_idf_hal::sys::esp_timer_get_time;
-use esp_idf_hal::uart::*;
-use radar_a_chepers::command::FRAME_FOOTER;
-use radar_a_chepers::command::FRAME_HEADER;
-use radar_a_chepers::command::SET_SINGLE_TARGET;
-use radar_a_chepers::target::TargetsList;
+#![no_std]
+#![no_main]
+#![deny(
+    clippy::mem_forget,
+    reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
+    holding buffers for the duration of a data transfer."
+)]
+
+use bt_hci::controller::ExternalController;
+use embassy_executor::Spawner;
+use esp_backtrace as _;
+use esp_hal::{
+    clock::CpuClock,
+    timer::{systimer::SystemTimer, timg::TimerGroup},
+    uart::{Config, DataBits, Parity, StopBits, Uart, UartRx, UartTx},
+    Async,
+};
+use esp_println as _;
+use esp_wifi::ble::controller::BleConnector;
+use radar_a_chepers::{
+    command::{FRAME_FOOTER, FRAME_HEADER, SET_SINGLE_TARGET},
+    target::TargetsList,
+};
 
 const READ_BUF_SIZE: usize = 64;
 
-fn write(uart: &mut UartDriver<'_>, bytes: &[u8]) -> eyre::Result<()> {
-    uart.write(bytes).unwrap();
-    uart.wait_tx_done(TickType::new_millis(100).into())?;
-    Ok(())
+esp_bootloader_esp_idf::esp_app_desc!();
+
+async fn write(tx: &mut UartTx<'static, Async>, bytes: &[u8]) {
+    defmt::info!("TX: {:#X}", bytes);
+    embedded_io_async::Write::write(tx, bytes).await.unwrap();
+    embedded_io_async::Write::flush(tx).await.unwrap();
 }
 
 /// Actively reads from the UART until it's empty to clear out old or junk data.
-fn flush_rx(uart: &mut UartDriver<'_>) {
+async fn flush_rx(rx: &mut UartRx<'static, Async>) {
     let mut buf = [0u8; READ_BUF_SIZE];
-    let start_time = unsafe { esp_timer_get_time() };
-    while unsafe { esp_timer_get_time() } - start_time < 100 * 1000 {
-        uart.read(&mut buf, TickType::new_millis(100).into()).ok();
-    }
+    embassy_time::with_timeout(embassy_time::Duration::from_millis(200), async {
+        loop {
+            embedded_io_async::Read::read(rx, &mut buf).await.ok();
+        }
+    })
+    .await
+    .ok();
 }
 
-fn wait_for_ack(uart: &mut UartDriver<'_>) -> eyre::Result<()> {
+async fn wait_for_ack(rx: &mut UartRx<'static, Async>) {
     let mut buffer = [0u8; READ_BUF_SIZE];
     let mut offset = 0;
-    let start_time = unsafe { esp_timer_get_time() };
-    const TIMEOUT_US: i64 = 2 * 1000 * 1000; // 2 seconds
-
-    loop {
-        // Check for the overall 2-second timeout.
-        if unsafe { esp_timer_get_time() } - start_time > TIMEOUT_US {
-            return Err(eyre::eyre!("Timed out waiting for ACK."));
-        }
-
-        let mut byte_buf = [0u8; 1];
-        // Perform a single-byte read with a short timeout. This allows the loop
-        // to remain responsive and check the main timeout.
-        match uart.read(&mut byte_buf, TickType::new_millis(100).into()) {
-            Ok(_) => {
-                // A byte was received, so append it to our buffer.
-                buffer[offset] = byte_buf[0];
-                offset += 1;
-
-                log::debug!("RX: {:#?}", &buffer[..offset]);
-
-                // Check if the buffer contains the complete ACK frame.
-                if buffer[..offset].starts_with(&FRAME_HEADER)
-                    && buffer[..offset].ends_with(&FRAME_FOOTER)
-                {
-                    return Ok(());
+    let result = embassy_time::with_timeout(embassy_time::Duration::from_secs(2), async {
+        loop {
+            match embedded_io_async::Read::read(rx, &mut buffer[offset..]).await {
+                Ok(len) => {
+                    offset += len;
+                    defmt::info!("RX: {:#X}", &buffer[..offset]);
+                    if buffer[..offset].starts_with(&FRAME_HEADER)
+                        && buffer[..offset].ends_with(&FRAME_FOOTER)
+                    {
+                        break;
+                    }
+                    if offset >= buffer.len() {
+                        defmt::warn!("Buffer overflow waiting for ACK.");
+                        offset = 0;
+                    }
                 }
-
-                // If the buffer is full and we haven't found an ACK, reset it.
-                if offset >= buffer.len() {
-                    log::warn!("Buffer overflow waiting for ACK.");
-                    offset = 0;
+                Err(error) => {
+                    defmt::warn!("RX error while waiting ACK: {:?}", error);
                 }
             }
-            Err(_) => {
-                // A read error likely means a timeout, which is expected.
-                // Continue the loop to keep checking for data.
-            }
         }
+    })
+    .await;
+
+    if result.is_err() {
+        panic!("Timed out waiting for ACK.");
     }
 }
 
-fn main() -> eyre::Result<()> {
-    esp_idf_hal::sys::link_patches();
-
-    // Bind the log crate to the ESP Logging facilities
-    esp_idf_svc::log::EspLogger::initialize_default();
-
-    let peripherals = Peripherals::take()?;
-    let tx = peripherals.pins.gpio17;
-    let rx = peripherals.pins.gpio18;
-
-    println!("Starting UART loopback test");
-    let config = config::Config::new()
-        .baudrate(Hertz(256_000))
-        .data_bits(config::DataBits::DataBits8)
-        .parity_none()
-        .stop_bits(config::StopBits::STOP1);
-    let mut uart = UartDriver::new(
-        peripherals.uart1,
-        tx,
-        rx,
-        Option::<gpio::Gpio0>::None,
-        Option::<gpio::Gpio1>::None,
-        &config,
-    )?;
-
-    // Set detection mode
-    flush_rx(&mut uart);
-    write(&mut uart, &SET_SINGLE_TARGET)?;
-    wait_for_ack(&mut uart)?;
-    flush_rx(&mut uart);
-    log::info!("Entered single target mode");
-
+#[embassy_executor::task]
+async fn reader(mut rx: UartRx<'static, Async>) {
     let mut rbuf = [0u8; READ_BUF_SIZE];
     let mut offset = 0;
     loop {
-        let result = uart.read(&mut rbuf[offset..], BLOCK);
+        let result = embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..]).await;
         match result {
             Ok(len) => {
                 offset += len;
-                log::debug!("RX: {:?}", &rbuf[..offset]);
+                defmt::debug!("RX: {:#X}", &rbuf[..offset]);
                 match TargetsList::try_from(&rbuf[..offset]) {
                     Ok(targets) => {
-                        log::info!("Targets: {:?}", targets);
+                        defmt::info!("Targets: {:#?}", targets);
                     }
                     Err(err) => {
-                        log::error!("Error parsing targets: {:?}", err);
+                        defmt::error!("Error parsing targets: {:?}", err);
                     }
                 }
                 offset = 0;
             }
-            Err(error) => {
-                log::error!("Error reading UART: {:?}", error);
-            }
+            Err(err) => defmt::error!("RX Error: {:?}", err),
         }
     }
+}
+
+#[esp_hal_embassy::main]
+async fn main(spawner: Spawner) {
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(config);
+
+    esp_alloc::heap_allocator!(size: 64 * 1024);
+    // COEX needs more RAM - so we've added some more
+    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 64 * 1024);
+
+    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
+    esp_hal_embassy::init(timer0.alarm0);
+
+    defmt::info!("Embassy initialized!");
+
+    let rng = esp_hal::rng::Rng::new(peripherals.RNG);
+    let timer1 = TimerGroup::new(peripherals.TIMG0);
+    let wifi_init = esp_wifi::init(timer1.timer0, rng, peripherals.RADIO_CLK)
+        .expect("Failed to initialize WIFI/BLE controller");
+    let (mut _wifi_controller, _interfaces) = esp_wifi::wifi::new(&wifi_init, peripherals.WIFI)
+        .expect("Failed to initialize WIFI controller");
+    // find more examples https://github.com/embassy-rs/trouble/tree/main/examples/esp32
+    let transport = BleConnector::new(&wifi_init, peripherals.BT);
+    let _ble_controller = ExternalController::<_, 20>::new(transport);
+
+    let config = Config::default()
+        // The docs say 115200 but the actual baud rate is 256000!!!
+        .with_baudrate(256_000)
+        .with_data_bits(DataBits::_8)
+        .with_parity(Parity::None)
+        .with_stop_bits(StopBits::_1);
+
+    let uart1 = Uart::new(peripherals.UART1, config)
+        .unwrap()
+        .with_tx(peripherals.GPIO17)
+        .with_rx(peripherals.GPIO18)
+        .into_async();
+    let (mut rx, mut tx) = uart1.split();
+    defmt::info!("UART initialized");
+
+    // Set detection mode
+    flush_rx(&mut rx).await;
+    write(&mut tx, SET_SINGLE_TARGET.get()).await;
+    wait_for_ack(&mut rx).await;
+    flush_rx(&mut rx).await;
+    defmt::info!("Entered single target mode");
+
+    spawner.spawn(reader(rx)).ok();
 }
