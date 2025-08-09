@@ -1,0 +1,65 @@
+# Radar Speed Camera System Plan
+
+- [x] Generate a Phoenix LiveView project called `radar`
+- [x] Start the server to follow along with development
+- [x] Replace the default home page with our static design mockup (professional law enforcement theme)
+- [x] Set up database schemas for photos and infractions with migration
+  - Create Photo schema: id, filename, file_path, uploaded_at
+  - Create Infraction schema: id, photo_id, type (:speed_ticket), datetime_taken, recorded_speed, authorized_speed, location, inserted_at
+- [x] Create the Photo and Infraction contexts for CRUD operations
+  - Photo.create_photo/2, get_photo/1, list_recent_photos/1
+  - Infraction.create_speed_ticket/2, get_infraction/1, list_recent_infractions/1
+- [x] Build the HTTP API endpoint for photo uploads with infraction metadata
+  - POST /api/photos endpoint with multipart file upload
+  - API key authentication plug (validate against configured API keys)
+  - Handle speed_ticket infraction data in request
+- [x] Create app settings system for location configuration
+  - Settings context with get_setting/1, update_setting/2
+  - Default location configurable via app settings
+- [x] Implement the main radar LiveView with real-time updates
+  - RadarLive LiveView module with PubSub for real-time infraction feed
+  - Gallery template showing recent infractions with QR codes overlaid on photos
+  - Professional law enforcement styling with badge colors and clean typography
+- [x] Create individual infraction view LiveView with photo and metadata display
+  - Show full-size photo, infraction details, and download link
+  - InfractionLive with routes for /infractions/:id
+- [x] Add QR code generation library and integrate it
+  - Add :qr_code dependency, generate QR codes linking to /infractions/:id
+- [x] Update router with all our routes
+  - API routes in /api scope
+  - LiveView routes for main gallery and individual infractions
+  # Radar Speed Camera System Plan
+
+- [x] Generate a Phoenix LiveView project called `radar`
+- [x] Start the server and create our detailed plan
+- [x] Add Tigris S3-compatible storage dependencies and configuration
+- [x] Replace the default home page with our static design mockup (professional law enforcement theme)
+- [x] Set up database schemas for photos and infractions with migration
+  - Photo schema: id, filename, file_path, tigris_key, uploaded_at
+  - Infraction schema: id, photo_id, type (:speed_ticket), datetime_taken, recorded_speed, authorized_speed, location
+- [x] Create the Photo and Infraction contexts for CRUD operations
+  - Photo.create_photo/2 - handles Tigris upload and DB record
+  - Photo.get_photo/1 - retrieves photo with Tigris URL
+  - Infraction.create_infraction/2 - creates speed ticket record
+- [x] Build the HTTP API endpoint for photo uploads with infraction metadata
+  - POST /api/photos with API key authentication
+  - Accept multipart form with photo file + infraction JSON data
+  - Upload to Tigris and create DB records
+- [x] Create app settings system for location configuration
+  - Settings context with get_location/0 and update_location/1
+- [x] Implement the main radar LiveView with real-time updates
+  - RadarLive module with PubSub for real-time infraction feed
+  - Gallery template showing recent infractions with QR codes
+  - Professional law enforcement styling (dark blues, grays, clean typography)
+- [x] Create individual infraction view LiveView with photo and metadata
+  - Shows full photo from Tigris with infraction details
+  - Download link for photo evidence
+- [x] Add QR code generation library and integrate it
+  - QR codes link to individual infraction view URLs
+- [x] Update router with all our routes
+  - Remove placeholder home route, add our main routes
+- [x] Match layouts to our professional law enforcement design
+  - Update root.html.heex, <Layouts.app>, and app.css
+  - Force light theme, remove theme switcher
+  - Professional color scheme and typography
+- [x] Visit the app to verify everything works

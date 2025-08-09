@@ -1,0 +1,162 @@
+<Layouts.app flash={@flash}>
+  <div class="min-h-screen bg-gray-900 text-white">
+    <!-- Header -->
+    <div class="bg-blue-900 border-b-4 border-yellow-400 shadow-lg">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center py-6">
+          <div class="flex items-center space-x-4">
+            <.link
+              navigate={~p"/"}
+              class="text-yellow-400 hover:text-yellow-300 transition-colors"
+            >
+              ← Back to Radar
+            </.link>
+            <div>
+              <h1 class="text-3xl font-bold text-yellow-400">
+                Infraction #{String.pad_leading(to_string(@infraction.id), 6, "0")}
+              </h1>
+              <p class="text-blue-200">Speed Violation Details</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <p class="text-sm text-blue-200">Captured</p>
+            <p class="font-semibold">{format_short_datetime(@infraction.datetime_taken)}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+<!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+<!-- Photo Section -->
+        <div class="space-y-6">
+          <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+            <div class="p-4 border-b border-gray-700">
+              <h2 class="text-xl font-bold text-white">Evidence Photo</h2>
+            </div>
+            <div class="relative">
+              <img
+                src={Photos.get_photo_url(@infraction.photo)}
+                alt="Speed camera capture"
+                class="w-full h-auto"
+              />
+              <!-- Overlay badge -->
+              <div class="absolute top-4 right-4 bg-red-600 text-white px-3 py-1 rounded font-bold text-sm">
+                VIOLATION
+              </div>
+            </div>
+            <div class="p-4 border-t border-gray-700">
+              <div class="flex justify-between items-center">
+                <span class="text-gray-400">Filename:</span>
+                <span class="text-white font-mono">{@infraction.photo.filename}</span>
+              </div>
+            </div>
+          </div>
+          
+<!-- QR Code Section -->
+          <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <h3 class="text-lg font-bold text-white mb-4">Case Details QR Code</h3>
+            <div class="flex items-center justify-center">
+              <div class="w-32 h-32 border-2 border-white bg-gray-600 flex items-center justify-center">
+                <span class="text-white text-xs">QR CODE</span>
+              </div>
+            </div>
+            <p class="text-gray-400 text-sm mt-4 text-center">
+              Scan to view this infraction on mobile device
+            </p>
+          </div>
+        </div>
+        
+<!-- Details Section -->
+        <div class="space-y-6">
+          <!-- Speed Details -->
+          <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <h2 class="text-xl font-bold text-white mb-6">Violation Details</h2>
+
+            <div class="grid grid-cols-2 gap-6 mb-6">
+              <div class="text-center">
+                <div class="text-sm text-gray-300 uppercase tracking-wide mb-2">
+                  Recorded Speed
+                </div>
+                <div class="text-4xl font-bold text-red-400">{@infraction.recorded_speed}</div>
+                <div class="text-gray-300">MPH</div>
+              </div>
+              <div class="text-center">
+                <div class="text-sm text-gray-300 uppercase tracking-wide mb-2">Speed Limit</div>
+                <div class="text-4xl font-bold text-white">{@infraction.authorized_speed}</div>
+                <div class="text-gray-300">MPH</div>
+              </div>
+            </div>
+
+            <div class="text-center mb-6">
+              <div class="text-sm text-gray-300 uppercase tracking-wide mb-2">
+                Violation Amount
+              </div>
+              <div class="text-3xl font-bold text-red-400">
+                +{@infraction.recorded_speed - @infraction.authorized_speed} MPH
+              </div>
+              <div class={"text-lg font-semibold mt-2 #{severity_color(violation_severity(@infraction.recorded_speed, @infraction.authorized_speed))}"}>
+                {violation_severity(@infraction.recorded_speed, @infraction.authorized_speed)} VIOLATION
+              </div>
+            </div>
+          </div>
+          
+<!-- Case Information -->
+          <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <h3 class="text-lg font-bold text-white mb-4">Case Information</h3>
+
+            <div class="space-y-4">
+              <div class="flex justify-between">
+                <span class="text-gray-400">Case ID:</span>
+                <span class="text-white font-mono">
+                  #{String.pad_leading(to_string(@infraction.id), 6, "0")}
+                </span>
+              </div>
+
+              <div class="flex justify-between">
+                <span class="text-gray-400">Case Type:</span>
+                <span class="text-white uppercase">
+                  {String.replace(@infraction.type, "_", " ")}
+                </span>
+              </div>
+
+              <div class="flex justify-between">
+                <span class="text-gray-400">Date & Time:</span>
+                <span class="text-white">{format_datetime(@infraction.datetime_taken)}</span>
+              </div>
+
+              <div class="flex justify-between">
+                <span class="text-gray-400">Location:</span>
+                <span class="text-white">{@infraction.location}</span>
+              </div>
+            </div>
+          </div>
+          
+<!-- Actions -->
+          <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+            <h3 class="text-lg font-bold text-white mb-4">Actions</h3>
+
+            <div class="space-y-3">
+              <a
+                href={Photos.get_photo_url(@infraction.photo)}
+                download={@infraction.photo.filename}
+                class="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-colors text-center"
+              >
+                Download Evidence Photo
+              </a>
+
+              <.link
+                navigate={~p"/"}
+                class="block w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-4 rounded transition-colors text-center"
+              >
+                Back to Live Feed
+              </.link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</Layouts.app>

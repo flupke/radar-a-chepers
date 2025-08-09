@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Radar Speed Enforcement System</title>
+    <style>
+      body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    </style>
+  </head>
+  <body class="h-full bg-gray-900 text-white">
+    <!-- Header -->
+    <header class="bg-blue-900 border-b-4 border-yellow-400 shadow-lg">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center py-4">
+          <div class="flex items-center space-x-3">
+            <div class="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center">
+              <svg class="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+              </svg>
+            </div>
+            <div>
+              <h1 class="text-2xl font-bold text-yellow-400">RADAR</h1>
+              <p class="text-sm text-blue-200">Speed Enforcement System</p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-4">
+            <div class="text-right">
+              <p class="text-sm text-blue-200">Location</p>
+              <p class="font-semibold">Highway 101 - Mile 42</p>
+            </div>
+            <div class="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+          </div>
+        </div>
+      </div>
+    </header>
+    
+<!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <!-- Stats Dashboard -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div class="bg-blue-800 rounded-lg p-6 border border-blue-700">
+          <h3 class="text-sm font-medium text-blue-300 uppercase tracking-wide">
+            Today's Infractions
+          </h3>
+          <p class="text-3xl font-bold text-white mt-2">24</p>
+        </div>
+        <div class="bg-red-800 rounded-lg p-6 border border-red-700">
+          <h3 class="text-sm font-medium text-red-300 uppercase tracking-wide">
+            Speed Violations
+          </h3>
+          <p class="text-3xl font-bold text-white mt-2">18</p>
+        </div>
+        <div class="bg-yellow-800 rounded-lg p-6 border border-yellow-700">
+          <h3 class="text-sm font-medium text-yellow-300 uppercase tracking-wide">Avg Speed</h3>
+          <p class="text-3xl font-bold text-white mt-2">67 MPH</p>
+        </div>
+        <div class="bg-green-800 rounded-lg p-6 border border-green-700">
+          <h3 class="text-sm font-medium text-green-300 uppercase tracking-wide">
+            System Status
+          </h3>
+          <p class="text-xl font-bold text-white mt-2">ACTIVE</p>
+        </div>
+      </div>
+      
+<!-- Recent Infractions -->
+      <div class="bg-gray-800 rounded-lg shadow-xl border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+          <h2 class="text-xl font-bold text-white">Recent Speed Infractions</h2>
+          <p class="text-sm text-gray-400">Live feed of captured violations</p>
+        </div>
+        <div class="p-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- Sample Infraction Cards -->
+            <div class="bg-gray-700 rounded-lg p-4 border border-gray-600 relative">
+              <div class="aspect-video bg-gray-600 rounded mb-3 relative overflow-hidden">
+                <div class="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-red-500/20">
+                </div>
+                <div class="absolute top-2 right-2 bg-black/70 rounded px-2 py-1">
+                  <span class="text-xs text-white font-mono">QR</span>
+                </div>
+                <div class="absolute bottom-2 left-2 bg-red-600 text-white px-2 py-1 rounded text-xs font-bold">
+                  VIOLATION
+                </div>
+              </div>
+              <div class="space-y-2">
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Speed:</span>
+                  <span class="text-red-400 font-bold">78 MPH</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Limit:</span>
+                  <span class="text-white">55 MPH</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Time:</span>
+                  <span class="text-white text-sm">14:32:18</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-gray-700 rounded-lg p-4 border border-gray-600 relative">
+              <div class="aspect-video bg-gray-600 rounded mb-3 relative overflow-hidden">
+                <div class="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-yellow-500/20">
+                </div>
+                <div class="absolute top-2 right-2 bg-black/70 rounded px-2 py-1">
+                  <span class="text-xs text-white font-mono">QR</span>
+                </div>
+                <div class="absolute bottom-2 left-2 bg-yellow-600 text-white px-2 py-1 rounded text-xs font-bold">
+                  WARNING
+                </div>
+              </div>
+              <div class="space-y-2">
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Speed:</span>
+                  <span class="text-yellow-400 font-bold">62 MPH</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Limit:</span>
+                  <span class="text-white">55 MPH</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Time:</span>
+                  <span class="text-white text-sm">14:28:45</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-gray-700 rounded-lg p-4 border border-gray-600 relative">
+              <div class="aspect-video bg-gray-600 rounded mb-3 relative overflow-hidden">
+                <div class="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-red-500/20">
+                </div>
+                <div class="absolute top-2 right-2 bg-black/70 rounded px-2 py-1">
+                  <span class="text-xs text-white font-mono">QR</span>
+                </div>
+                <div class="absolute bottom-2 left-2 bg-red-600 text-white px-2 py-1 rounded text-xs font-bold">
+                  VIOLATION
+                </div>
+              </div>
+              <div class="space-y-2">
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Speed:</span>
+                  <span class="text-red-400 font-bold">84 MPH</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Limit:</span>
+                  <span class="text-white">55 MPH</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-400 text-sm">Time:</span>
+                  <span class="text-white text-sm">14:25:12</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
