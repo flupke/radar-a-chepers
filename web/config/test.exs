@@ -1,5 +1,10 @@
 import Config
 
+config :radar, api_keys: ["radar-dev-key"]
+
+# Configure mock S3 client for tests
+config :radar, :s3_client, Radar.MockS3Client
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used

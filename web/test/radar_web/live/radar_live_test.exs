@@ -6,7 +6,6 @@ defmodule RadarWeb.RadarLiveTest do
   import Radar.PhotosFixtures
   import Radar.InfractionsFixtures
 
-  alias Radar.Photos
   alias Radar.Infractions
   alias Radar.Repo
 
@@ -59,7 +58,7 @@ defmodule RadarWeb.RadarLiveTest do
           location: "Highway 2"
         })
 
-      infraction3 =
+      _infraction3 =
         infraction_fixture(%{
           photo_id: photo3.id,
           datetime_taken: newest_time,
@@ -74,7 +73,7 @@ defmodule RadarWeb.RadarLiveTest do
       assert html =~ "90 MPH"
       assert html =~ "Highway 3"
       # Use photo URL directly
-      assert html =~ "/uploads/"
+      assert html =~ "https://test.tigris.dev/"
       refute html =~ "RADAR SYSTEM ACTIVE"
       # oldest should not be visible
       refute html =~ "70 MPH"
@@ -116,10 +115,10 @@ defmodule RadarWeb.RadarLiveTest do
       assert html =~ "QR CODE"
 
       # Check photo is displayed
-      assert html =~ "/uploads/"
+      assert html =~ "https://test.tigris.dev/"
 
       # Check case ID format
-      assert html =~ "#000001"
+      assert html =~ "#1"
     end
   end
 

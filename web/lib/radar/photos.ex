@@ -11,10 +11,11 @@ defmodule Radar.Photos do
   Returns the list of recent photos with preloaded infractions.
   """
   def list_recent_photos(limit \\ 50) do
-    Photo
-    |> order_by(desc: :inserted_at)
-    |> limit(^limit)
-    |> preload(:infractions)
+    from(p in Photo,
+      order_by: [desc: p.inserted_at, desc: p.id],
+      limit: ^limit,
+      preload: [:infractions]
+    )
     |> Repo.all()
   end
 
@@ -28,52 +29,81 @@ defmodule Radar.Photos do
   end
 
   @doc """
-  Creates a photo record and uploads the file to Tigris storage.
+  Gets a single photo with preloaded infractions and adds Tigris URL.
   """
-  def create_photo(attrs, file_data) do
-    tigris_key = Photo.generate_tigris_key(attrs["filename"])
+  def get_photo(id) do
+    case Repo.get(Photo, id) do
+      nil ->
+        {:error, :not_found}
 
-    case upload_to_tigris(tigris_key, file_data, attrs["content_type"]) do
-      :ok ->
-        photo_attrs =
-          Map.merge(attrs, %{
-            "tigris_key" => tigris_key
-          })
-
-        %Photo{}
-        |> Photo.upload_changeset(photo_attrs)
-        |> Repo.insert()
-        |> case do
-          {:ok, photo} ->
-            Phoenix.PubSub.broadcast(Radar.PubSub, "photos", {:new_photo, photo})
-            {:ok, photo}
-
-          error ->
-            error
+      photo ->
+        case get_photo_url(photo) do
+          {:ok, url} -> {:ok, Map.put(photo, :tigris_url, url)}
+          {:error, reason} -> {:error, reason}
         end
-
-      {:error, reason} ->
-        {:error, "Upload failed: #{reason}"}
     end
   end
 
   @doc """
-  Gets the public URL for a photo from Tigris storage.
+  Creates a photo record and uploads the file to Tigris storage.
+  Single arity version for simple attrs map.
   """
-  def get_photo_url(photo) do
-    # For testing: return local static file URL
-    "/uploads/#{Path.basename(photo.tigris_key)}"
+  def create_photo(attrs) do
+    file_data = attrs["data"]
+    filename = attrs["filename"]
+    content_type = attrs["content_type"] || "image/jpeg"
+
+    if is_nil(file_data) do
+      {:error, "Failed to upload to Tigris: :badarg"}
+    else
+      tigris_key = Photo.generate_tigris_key(filename)
+
+      case upload_to_tigris(tigris_key, file_data, content_type) do
+        {:ok, _} ->
+          photo_attrs = %{
+            "filename" => filename,
+            "tigris_key" => tigris_key,
+            "content_type" => content_type,
+            "file_size" => attrs["file_size"] || byte_size(file_data)
+          }
+
+          %Photo{}
+          |> Photo.upload_changeset(photo_attrs)
+          |> Repo.insert()
+          |> case do
+            {:ok, photo} ->
+              {:ok, photo}
+
+            error ->
+              # Clean up the uploaded file if database insert fails
+              delete_from_tigris(tigris_key)
+              error
+          end
+
+        {:error, reason} ->
+          {:error, "Failed to upload to Tigris: #{inspect(reason)}"}
+      end
+    end
   end
 
-  defp upload_to_tigris(key, file_data, _content_type) do
-    # For testing: save to local priv/static/uploads directory
-    upload_dir = Path.join([Application.app_dir(:radar, "priv"), "static", "uploads"])
-    File.mkdir_p!(upload_dir)
-    file_path = Path.join(upload_dir, Path.basename(key))
+  @doc """
+  Creates a photo record and uploads the file to Tigris storage.
+  Two arity version for backward compatibility with existing API controller.
+  """
+  def create_photo(attrs, file_data) do
+    attrs_with_data = Map.put(attrs, "data", file_data)
+    create_photo(attrs_with_data)
+  end
 
-    case File.write(file_path, file_data) do
-      :ok -> :ok
-      {:error, reason} -> {:error, reason}
+  @doc """
+  Gets the presigned URL for a photo from Tigris storage.
+  Returns {:ok, url} or {:error, reason}
+  """
+  def get_photo_url(photo) do
+    case s3_client().presigned_url(:get, photo.tigris_key, expires_in: 3600) do
+      {:ok, %{url: url}} -> {:ok, url}
+      {:ok, url} when is_binary(url) -> {:ok, url}
+      error -> error
     end
   end
 
@@ -81,15 +111,11 @@ defmodule Radar.Photos do
   Deletes a photo from both database and Tigris storage.
   """
   def delete_photo(%Photo{} = photo) do
-    # For testing: delete from local storage
-    upload_dir = Path.join([Application.app_dir(:radar, "priv"), "static", "uploads"])
-    file_path = Path.join(upload_dir, Path.basename(photo.tigris_key))
-
-    case File.rm(file_path) do
-      :ok -> Repo.delete(photo)
-      # File already gone
-      {:error, :enoent} -> Repo.delete(photo)
-      {:error, reason} -> {:error, "Failed to delete file: #{reason}"}
+    with {:ok, _} <- delete_from_tigris(photo.tigris_key),
+         {:ok, _} <- Repo.delete(photo) do
+      {:ok, photo}
+    else
+      {:error, reason} -> {:error, "Failed to delete photo: #{inspect(reason)}"}
     end
   end
 
@@ -103,5 +129,28 @@ defmodule Radar.Photos do
     Photo
     |> where([p], p.inserted_at >= ^start_of_day)
     |> Repo.aggregate(:count, :id)
+  end
+
+  # Private functions for Tigris S3 operations
+
+  defp upload_to_tigris(key, file_data, content_type) do
+    case s3_client().put_object(key, file_data, content_type: content_type) do
+      {:ok, _} -> {:ok, :uploaded}
+      error -> error
+    end
+  end
+
+  defp delete_from_tigris(key) do
+    case s3_client().delete_object(key) do
+      {:ok, _} -> {:ok, :deleted}
+      error -> error
+    end
+  end
+
+  @doc """
+  S3 client module. Can be mocked for testing.
+  """
+  def s3_client do
+    Application.fetch_env!(:radar, :s3_client)
   end
 end

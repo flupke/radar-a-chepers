@@ -1,9 +1,7 @@
 defmodule RadarWeb.RadarLive do
   use RadarWeb, :live_view
 
-  alias Radar.Photos
   alias Radar.Infractions
-  alias Radar.QrCodes
 
   # 8 seconds in milliseconds
   @default_display_duration 8000
@@ -80,17 +78,6 @@ defmodule RadarWeb.RadarLive do
       schedule_next_photo(socket)
     else
       socket
-    end
-  end
-
-  defp format_datetime(datetime) do
-    Calendar.strftime(datetime, "%m/%d/%Y %I:%M:%S %p")
-  end
-
-  defp generate_qr_code(infraction_id) do
-    case QrCodes.generate_infraction_qr_base64(infraction_id) do
-      {:ok, qr_base64} -> qr_base64
-      {:error, _reason} -> nil
     end
   end
 end

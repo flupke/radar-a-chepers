@@ -4,8 +4,6 @@ defmodule RadarWeb.Api.PhotoController do
   alias Radar.Photos
   alias Radar.Infractions
 
-  @api_keys Application.compile_env(:radar, :api_keys, ["radar-dev-key"])
-
   def create(conn, params) do
     case authenticate_api_key(conn) do
       {:ok, _key} ->
@@ -25,7 +23,7 @@ defmodule RadarWeb.Api.PhotoController do
       is_nil(api_key) ->
         {:error, "API key required"}
 
-      api_key in @api_keys ->
+      api_key in configured_api_keys() ->
         {:ok, api_key}
 
       true ->
@@ -43,7 +41,11 @@ defmodule RadarWeb.Api.PhotoController do
         filename: photo.filename,
         tigris_key: photo.tigris_key,
         infraction_id: hd(photo.infractions).id,
-        url: Photos.get_photo_url(photo)
+        url:
+          case Photos.get_photo_url(photo) do
+            {:ok, url} -> url
+            _ -> nil
+          end
       })
     else
       {:error, reason} ->
@@ -123,4 +125,8 @@ defmodule RadarWeb.Api.PhotoController do
   end
 
   defp parse_datetime(_), do: NaiveDateTime.utc_now()
+
+  defp configured_api_keys() do
+    Application.get_env(:radar, :api_keys)
+  end
 end
