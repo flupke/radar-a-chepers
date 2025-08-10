@@ -16,7 +16,7 @@ doctest = false
 bench = false
 
 [dependencies]
-defmt = "1.0.1"
+defmt = "0.3.0"
 esp-bootloader-esp-idf = "0.1.0"
 esp-hal = { version = "=1.0.0-beta.1", features = [
   "defmt",

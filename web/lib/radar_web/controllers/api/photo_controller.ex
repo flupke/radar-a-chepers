@@ -87,7 +87,6 @@ defmodule RadarWeb.Api.PhotoController do
         infraction_attrs =
           Map.merge(decoded_infraction, %{
             "photo_id" => photo.id,
-            "datetime_taken" => parse_datetime(decoded_infraction["datetime_taken"]),
             "recorded_speed" => parse_integer(decoded_infraction["recorded_speed"]),
             "authorized_speed" => parse_integer(decoded_infraction["authorized_speed"]),
             "location" => decoded_infraction["location"]
@@ -116,15 +115,6 @@ defmodule RadarWeb.Api.PhotoController do
 
   defp parse_integer(value) when is_integer(value), do: value
   defp parse_integer(_), do: 0
-
-  defp parse_datetime(datetime_string) when is_binary(datetime_string) do
-    case NaiveDateTime.from_iso8601(datetime_string) do
-      {:ok, datetime} -> datetime
-      {:error, _} -> NaiveDateTime.utc_now()
-    end
-  end
-
-  defp parse_datetime(_), do: NaiveDateTime.utc_now()
 
   defp configured_api_keys() do
     Application.get_env(:radar, :api_keys)

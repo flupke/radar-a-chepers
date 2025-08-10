@@ -6,6 +6,9 @@
     holding buffers for the duration of a data transfer."
 )]
 
+const EVENTS_PREFIX: &str = "EVENTS: ";
+const MAX_SPEED_PREFIX: &str = "MAX_SPEED: ";
+
 use bt_hci::controller::ExternalController;
 use embassy_executor::Spawner;
 use esp_backtrace as _;
@@ -89,6 +92,8 @@ async fn reader(mut rx: UartRx<'static, Async>) {
                 match TargetsList::try_from(&rbuf[..offset]) {
                     Ok(targets) => {
                         defmt::info!("Targets: {:#?}", targets);
+                        let max_speed = targets.max_speed();
+                        defmt::println!("{}{}{}", EVENTS_PREFIX, MAX_SPEED_PREFIX, max_speed);
                     }
                     Err(err) => {
                         defmt::error!("Error parsing targets: {:?}", err);

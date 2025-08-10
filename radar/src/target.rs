@@ -3,6 +3,11 @@ const FOOTER: [u8; 2] = [0x55, 0xCC];
 const MAX_TARGETS: usize = 4;
 const TARGET_LENGTH: usize = 8;
 
+enum TargetParseError {
+    InvalidDataLength,
+    Empty,
+}
+
 #[derive(Debug, defmt::Format)]
 struct Target {
     // X coordinate in mm
@@ -16,11 +21,6 @@ struct Target {
 
     // Distance resolution in mm
     distance_resolution: u16,
-}
-
-enum TargetParseError {
-    InvalidDataLength,
-    Empty,
 }
 
 impl TryFrom<&[u8]> for Target {
@@ -56,6 +56,16 @@ fn parse_custom_i16(slice: &[u8]) -> i16 {
 #[derive(Debug, defmt::Format)]
 pub struct TargetsList {
     targets: [Option<Target>; HEADER.len()],
+}
+
+impl TargetsList {
+    pub fn max_speed(&self) -> i16 {
+        self.targets
+            .iter()
+            .map(|t| t.as_ref().map_or(0, |t| t.speed))
+            .max()
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, defmt::Format)]
