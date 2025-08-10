@@ -202,18 +202,18 @@ defmodule RadarWeb.RadarLiveTest do
 
       {:ok, view, _html} = live(conn, "/")
 
-      # Should start with newest (Location 5, 90 MPH)
-      assert render(view) =~ "90 MPH"
+      # Should start with newest (Location 5, 100 MPH)
+      assert render(view) =~ "100 MPH"
       assert render(view) =~ "Location 5"
 
       # Cycle through all infractions and verify order
       expected_sequence = [
-        {"80 MPH", "Location 4"},
-        {"70 MPH", "Location 3"},
-        {"60 MPH", "Location 2"},
-        {"50 MPH", "Location 1"},
+        {"90 MPH", "Location 4"},
+        {"80 MPH", "Location 3"},
+        {"70 MPH", "Location 2"},
+        {"60 MPH", "Location 1"},
         # Should wrap back to newest
-        {"90 MPH", "Location 5"}
+        {"100 MPH", "Location 5"}
       ]
 
       Enum.with_index(expected_sequence, 1)

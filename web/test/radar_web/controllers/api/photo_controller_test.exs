@@ -51,7 +51,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert json_response(conn, 401)["error"] == "API key required"
     end
 
-      _conn: conn,
+    test "rejects requests with an invalid API key", %{conn: conn, upload: upload} do
       conn =
         conn
         |> put_req_header("x-api-key", @invalid_api_key)
@@ -63,7 +63,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert json_response(conn, 401)["error"] == "Invalid API key"
     end
 
-      _conn: conn,
+    test "creates a photo and infraction with valid data", %{conn: conn, upload: upload} do
       conn =
         conn
         |> put_req_header("x-api-key", @valid_api_key)
@@ -90,7 +90,10 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert File.exists?(file_path)
     end
 
-      _conn: conn,
+    test "returns error and rolls back transaction if infraction data is invalid", %{
+      conn: conn,
+      upload: upload
+    } do
       conn =
         conn
         |> put_req_header("x-api-key", @valid_api_key)
@@ -106,7 +109,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
     end
 
     test "returns error if missing photo or infraction data in request", %{
-      _conn: conn,
+      conn: conn,
       upload: upload
     } do
       new_conn =
