@@ -107,6 +107,11 @@ defmodule Radar.Photos do
     end
   end
 
+  def get_photo_url!(photo) do
+    {:ok, url} = get_photo_url(photo)
+    url
+  end
+
   @doc """
   Deletes a photo from both database and Tigris storage.
   """
