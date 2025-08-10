@@ -9,7 +9,9 @@ import Config
 
 config :radar,
   ecto_repos: [Radar.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  api_keys: [],
+  s3_client: Radar.S3
 
 # Configures the endpoint
 config :radar, RadarWeb.Endpoint,

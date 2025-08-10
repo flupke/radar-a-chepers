@@ -2,7 +2,6 @@ defmodule RadarWeb.InfractionLive do
   use RadarWeb, :live_view
 
   alias Radar.Infractions
-  alias Radar.Photos
 
   def mount(%{"id" => id}, _session, socket) do
     try do

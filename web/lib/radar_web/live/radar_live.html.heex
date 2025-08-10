@@ -14,7 +14,12 @@
       <div class="relative w-full h-full">
         <!-- Fullscreen photo background -->
         <img
-          src={Photos.get_photo_url(@current_infraction.photo)}
+          src={
+            case Radar.Photos.get_photo_url(@current_infraction.photo) do
+              {:ok, url} -> url
+              _ -> "/images/placeholder.jpg"
+            end
+          }
           alt="Speed camera capture"
           class="w-full h-full object-cover"
         />
@@ -25,7 +30,9 @@
           <div class="absolute top-0 left-0 right-0 bg-black bg-opacity-80 px-8 py-4">
             <div class="flex justify-between items-center text-xl">
               <div class="font-bold">SPEED VIOLATION</div>
-              <div>{format_datetime(@current_infraction.datetime_taken)}</div>
+              <div class="text-sm text-gray-300">
+                {Calendar.strftime(@current_infraction.datetime_taken, "%m/%d/%Y %I:%M:%S %p")}
+              </div>
             </div>
           </div>
           
@@ -57,9 +64,7 @@
                   {String.replace(@current_infraction.type, "_", " ")}
                 </div>
                 <div class="text-sm text-gray-300 uppercase tracking-wide">CASE ID</div>
-                <div class="text-lg font-bold text-white">
-                  #{String.pad_leading(to_string(@current_infraction.id), 6, "0")}
-                </div>
+                <div class="text-lg font-bold text-white">#{@current_infraction.id}</div>
               </div>
               
 <!-- Right: QR Code placeholder -->

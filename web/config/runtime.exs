@@ -61,6 +61,19 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  config :radar, api_keys: [System.get_env("RADAR_API_KEY") || raise("Missing RADAR_API_KEY")]
+
+  config :ex_aws,
+    access_key_id: System.fetch_env!("AWS_ACCESS_KEY_ID"),
+    secret_access_key: System.fetch_env!("AWS_SECRET_ACCESS_KEY"),
+    region: System.fetch_env!("AWS_REGION")
+
+  s3_endpoint_url = System.fetch_env!("AWS_ENDPOINT_URL_S3")
+  uri = URI.parse(s3_endpoint_url)
+  config :ex_aws, :s3, host: uri.host, scheme: "#{uri.scheme}://", port: uri.port
+
+  config :radar, s3_bucket: System.fetch_env!("BUCKET_NAME")
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

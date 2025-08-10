@@ -61,9 +61,10 @@ defmodule Radar.MixProject do
       {:bandit, "~> 1.5"},
       {:ex_aws, "~> 2.1"},
       {:ex_aws_s3, "~> 2.0"},
-      # Added comma here
       {:hackney, "~> 1.9"},
-      {:qr_code, "~> 3.1"}
+      {:qr_code, "~> 3.1"},
+      {:sweet_xml, "~> 0.6"},
+      {:mox, "~> 1.0", only: :test}
     ]
   end
 

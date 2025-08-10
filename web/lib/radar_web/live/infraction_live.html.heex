@@ -38,7 +38,7 @@
             </div>
             <div class="relative">
               <img
-                src={Photos.get_photo_url(@infraction.photo)}
+                src={Radar.Photos.get_photo_url(@infraction.photo)}
                 alt="Speed camera capture"
                 class="w-full h-auto"
               />
@@ -140,7 +140,7 @@
 
             <div class="space-y-3">
               <a
-                href={Photos.get_photo_url(@infraction.photo)}
+                href={Radar.Photos.get_photo_url(@infraction.photo)}
                 download={@infraction.photo.filename}
                 class="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-colors text-center"
               >

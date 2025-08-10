@@ -42,7 +42,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
 
     on_exit(fn -> File.rm(upload.path) end)
 
-    %{upload: upload, test_image_data: test_image_data}
+    %{upload: upload}
   end
 
   describe "POST /api/photos" do
@@ -64,6 +64,8 @@ defmodule RadarWeb.Api.PhotoControllerTest do
     end
 
     test "creates a photo and infraction with valid data", %{conn: conn, upload: upload} do
+      # Uses the configured MockS3Client - no explicit mocking needed
+
       conn =
         conn
         |> put_req_header("x-api-key", @valid_api_key)
@@ -83,17 +85,17 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert infraction.authorized_speed == 55
       assert infraction.location == "Highway 101 Mile 42"
 
-      # Verify the photo was saved to local upload directory
-      upload_dir = Path.join([Application.app_dir(:radar, "priv"), "static", "uploads"])
-      local_filename = Path.basename(photo.tigris_key)
-      file_path = Path.join(upload_dir, local_filename)
-      assert File.exists?(file_path)
+      # Verify the photo record has the Tigris key
+      assert String.starts_with?(photo.tigris_key, "radar/photos/")
+      assert String.ends_with?(photo.tigris_key, ".jpg")
     end
 
     test "returns error and rolls back transaction if infraction data is invalid", %{
       conn: conn,
       upload: upload
     } do
+      # Uses the configured MockS3Client - no explicit mocking needed
+
       conn =
         conn
         |> put_req_header("x-api-key", @valid_api_key)
@@ -108,23 +110,20 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert Infractions.list_recent_infractions() == []
     end
 
-    test "returns error if missing photo or infraction data in request", %{
-      conn: conn,
-      upload: upload
-    } do
-      new_conn =
+    test "returns error if missing photo or infraction data in request", %{upload: upload} do
+      conn =
         build_conn()
         |> put_req_header("x-api-key", @valid_api_key)
         |> post("/api/photos", %{"photo" => upload})
 
-      assert json_response(new_conn, 400)["error"] == "Missing photo or infraction data"
+      assert json_response(conn, 400)["error"] == "Missing photo or infraction data"
 
-      new_conn =
+      conn =
         build_conn()
         |> put_req_header("x-api-key", @valid_api_key)
         |> post("/api/photos", %{"infraction" => @valid_infraction_data})
 
-      assert json_response(new_conn, 400)["error"] == "Missing photo or infraction data"
+      assert json_response(conn, 400)["error"] == "Missing photo or infraction data"
     end
 
     test "handles file read errors gracefully", %{conn: conn} do
