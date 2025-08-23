@@ -9,7 +9,8 @@ run-uploader: $(RADAR_BINARY)
 		--serial-port /dev/ttyACM0 \
 		--api-key $(API_KEY) \
 		--api-endpoint $(API_ENDPOINT) \
-		--elf-path ../$(RADAR_BINARY)
+		--elf-path ../$(RADAR_BINARY) \
+		--photos-dir ../photos
 
 $(RADAR_BINARY): $(RADAR_SOURCES)
 	cd radar && cargo espflash flash
