@@ -50,7 +50,7 @@ async fn flush_rx(rx: &mut UartRx<'static, Async>) {
 async fn wait_for_ack(rx: &mut UartRx<'static, Async>) {
     let mut buffer = [0u8; READ_BUF_SIZE];
     let mut offset = 0;
-    let result = embassy_time::with_timeout(embassy_time::Duration::from_secs(2), async {
+    let result = embassy_time::with_timeout(embassy_time::Duration::from_secs(10), async {
         loop {
             match embedded_io_async::Read::read(rx, &mut buffer[offset..]).await {
                 Ok(len) => {
@@ -91,9 +91,9 @@ async fn reader(mut rx: UartRx<'static, Async>) {
                 defmt::debug!("RX: {:#X}", &rbuf[..offset]);
                 match TargetsList::try_from(&rbuf[..offset]) {
                     Ok(targets) => {
-                        defmt::info!("Targets: {:#?}", targets);
+                        defmt::debug!("Targets: {:#?}", targets);
                         let max_speed = targets.max_speed();
-                        defmt::println!("{}{}{}", EVENTS_PREFIX, MAX_SPEED_PREFIX, max_speed);
+                        defmt::info!("{}{}{}", EVENTS_PREFIX, MAX_SPEED_PREFIX, max_speed);
                     }
                     Err(err) => {
                         defmt::error!("Error parsing targets: {:?}", err);

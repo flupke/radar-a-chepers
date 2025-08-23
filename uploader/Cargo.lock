@@ -1853,6 +1853,7 @@ name = "uploader"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "defmt-decoder",
  "env_logger",

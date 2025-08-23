@@ -1,12 +1,10 @@
+use chrono::{DateTime, TimeDelta, Utc};
 use clap::Parser;
 use defmt_decoder::{DecodeError, Table};
 use log::{error, info};
 use std::fs;
 use std::io::Read;
 use std::time::Duration;
-
-const EVENT_PREFIX: &str = "EVENTS: ";
-const MAX_SPEED_PREFIX: &str = "MAX_SPEED: ";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -53,6 +51,7 @@ fn main() -> anyhow::Result<()> {
     info!("Listening for logs on {port_name}...");
 
     let mut offset = 0;
+    let mut infraction_recorder = InfractionRecorder::new(25);
     loop {
         match port.read(&mut buffer) {
             Ok(n) => {
@@ -61,8 +60,8 @@ fn main() -> anyhow::Result<()> {
                 loop {
                     match stream_decoder.decode() {
                         Ok(frame) => {
-                            let log_message = frame.display(true).to_string();
-                            handle_radar_message(log_message);
+                            let log_message = frame.display_message().to_string();
+                            infraction_recorder.update(log_message);
                             offset = 0;
                         }
                         Err(DecodeError::UnexpectedEof) => {
@@ -94,25 +93,58 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_radar_message(message: String) {
-    if message.starts_with(EVENT_PREFIX) {
-        handle_event(message.strip_prefix(EVENT_PREFIX).unwrap());
-    } else {
-        println!("Received log: {message}");
-    }
+#[derive(Default)]
+struct InfractionRecorder {
+    authorized_speed: i16,
+    last_infraction: Option<Infraction>,
 }
 
-fn handle_event(event: &str) {
-    if event.starts_with(MAX_SPEED_PREFIX) {
-        let max_speed = event.strip_prefix(MAX_SPEED_PREFIX).unwrap();
-        let max_speed = max_speed.parse::<i16>();
-        if max_speed > 50 {
+impl InfractionRecorder {
+    const MAX_SPEED_PREFIX: &str = "EVENTS: MAX_SPEED: ";
+
+    fn new(authorized_speed: i16) -> Self {
+        Self {
+            authorized_speed,
+            ..Default::default()
+        }
+    }
+
+    fn update(&mut self, message: String) {
+        if let Some(infraction) = &self.last_infraction {
+            if Utc::now().signed_duration_since(infraction.datetime_taken) < TimeDelta::seconds(1) {
+                return;
+            }
+        }
+
+        if !message.starts_with(Self::MAX_SPEED_PREFIX) {
+            return;
+        }
+        let max_speed = message.strip_prefix(Self::MAX_SPEED_PREFIX).unwrap();
+        let Ok(max_speed) = max_speed.parse::<i16>() else {
+            log::error!("Failed to parse max speed: {max_speed}");
+            return;
+        };
+        if max_speed > self.authorized_speed {
             let infraction = Infraction {
                 recorded_speed: max_speed,
-                authorized_speed: AUTHORIZED_SPEED,
+                authorized_speed: self.authorized_speed,
                 location: "Lorgues".to_string(),
                 datetime_taken: Utc::now(),
             };
+            println!("Infraction: {:#?}", infraction);
+            self.last_infraction = Some(infraction);
         }
     }
+
+    fn record_infraction(&mut self, infraction: Infraction) {
+        self.last_infraction = Some(infraction);
+    }
+}
+
+#[derive(Debug)]
+struct Infraction {
+    recorded_speed: i16,
+    authorized_speed: i16,
+    location: String,
+    datetime_taken: DateTime<Utc>,
 }

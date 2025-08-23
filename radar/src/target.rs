@@ -62,7 +62,7 @@ impl TargetsList {
     pub fn max_speed(&self) -> i16 {
         self.targets
             .iter()
-            .map(|t| t.as_ref().map_or(0, |t| t.speed))
+            .map(|t| t.as_ref().map_or(0, |t| -t.speed))
             .max()
             .unwrap_or(0)
     }

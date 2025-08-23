@@ -16,3 +16,4 @@ clap = { version = "4.0", features = ["derive"] }
 serialport = "4.3.0"
 defmt-decoder = "1.0.0"
 anyhow = "1.0.98"
+chrono = "0.4.41"
