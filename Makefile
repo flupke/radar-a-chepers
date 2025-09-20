@@ -12,5 +12,11 @@ run-uploader: $(RADAR_BINARY)
 		--elf-path ../$(RADAR_BINARY) \
 		--photos-dir ../photos
 
+run-web:
+	cd web && \
+		mix setup && \
+		mix ecto.migrate && \
+		mix phx.server
+
 $(RADAR_BINARY): $(RADAR_SOURCES)
 	cd radar && cargo espflash flash

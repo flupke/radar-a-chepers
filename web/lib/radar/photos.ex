@@ -46,7 +46,6 @@ defmodule Radar.Photos do
 
   @doc """
   Creates a photo record and uploads the file to Tigris storage.
-  Single arity version for simple attrs map.
   """
   def create_photo(attrs) do
     file_data = attrs["data"]
@@ -88,7 +87,6 @@ defmodule Radar.Photos do
 
   @doc """
   Creates a photo record and uploads the file to Tigris storage.
-  Two arity version for backward compatibility with existing API controller.
   """
   def create_photo(attrs, file_data) do
     attrs_with_data = Map.put(attrs, "data", file_data)
