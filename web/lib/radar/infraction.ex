@@ -2,6 +2,8 @@ defmodule Radar.Infraction do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @primary_key {:id, :binary_id, autogenerate: true}
+
   schema "infractions" do
     field :type, :string, default: "speed_ticket"
     field :datetime_taken, :naive_datetime

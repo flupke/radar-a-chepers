@@ -12,7 +12,7 @@ defmodule Radar.Repo.Migrations.CreatePhotosAndInfractions do
       timestamps()
     end
 
-    create table(:infractions) do
+    create table(:infractions, primary_key: [name: :id, type: :binary_id]) do
       add :photo_id, references(:photos, on_delete: :delete_all), null: false
       add :type, :string, null: false, default: "speed_ticket"
       add :datetime_taken, :naive_datetime, null: false

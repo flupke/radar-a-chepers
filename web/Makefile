@@ -58,6 +58,14 @@ fly-cors: ## Set CORS policy on the Tigris bucket
 		--cors-configuration file://$(CORS)
 	@rm -f $(CORS)
 
+.PHONY: fly-reset-db
+fly-reset-db: ## Drop and recreate the prod database (DESTRUCTIVE)
+	@echo "WARNING: This will destroy all data in the production database!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	fly ssh console --app $(FLY_APP) -C "rm -f /mnt/name/name.db /mnt/name/name.db-shm /mnt/name/name.db-wal"
+	fly apps restart $(FLY_APP)
+	@echo "==> Database reset. Migrations will run automatically on restart."
+
 .PHONY: logs
 logs: ## Tail Fly.io logs
 	fly logs --app $(FLY_APP)
