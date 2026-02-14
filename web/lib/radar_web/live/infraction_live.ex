@@ -114,17 +114,37 @@ defmodule RadarWeb.InfractionLive do
 
             <!-- Actions -->
             <div class="p-5 mt-auto">
-              <a
-                href={Radar.Photos.get_photo_url!(@infraction.photo)}
-                download={@infraction.photo.filename}
+              <button
+                phx-click={
+                  JS.dispatch("phx:download",
+                    detail: %{
+                      url: Radar.Photos.get_photo_url!(@infraction.photo),
+                      filename: @infraction.photo.filename
+                    }
+                  )
+                }
                 class="btn btn-primary btn-sm w-full"
               >
                 Download Photo
-              </a>
+              </button>
             </div>
           </div>
         </div>
       </div>
+
+      <script :type={Phoenix.LiveView.ColocatedJS}>
+        window.addEventListener("phx:download", (e) => {
+          fetch(e.detail.url)
+            .then(r => r.blob())
+            .then(blob => {
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = e.detail.filename;
+              a.click();
+              URL.revokeObjectURL(a.href);
+            });
+        });
+      </script>
     </Layouts.app>
     """
   end

@@ -1,8 +1,7 @@
 defmodule Radar.S3 do
   @callback put_object(binary(), binary(), keyword()) :: {:ok, map()} | {:error, term()}
   @callback delete_object(binary()) :: {:ok, map()} | {:error, term()}
-  @callback presigned_url(atom(), binary(), keyword()) ::
-              {:ok, binary()} | {:error, term()}
+  @callback public_url(binary()) :: binary()
 
   def put_object(object, body, opts) do
     ExAws.S3.put_object(bucket(), object, body, opts) |> ExAws.request()
@@ -12,9 +11,9 @@ defmodule Radar.S3 do
     ExAws.S3.delete_object(bucket(), key) |> ExAws.request()
   end
 
-  def presigned_url(method, key, opts) do
-    ExAws.Config.new(:s3)
-    |> ExAws.S3.presigned_url(method, bucket(), key, opts)
+  def public_url(key) do
+    config = ExAws.Config.new(:s3)
+    "#{config.scheme}#{bucket()}.#{config.host}/#{key}"
   end
 
   defp bucket do

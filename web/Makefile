@@ -12,6 +12,9 @@ bootstrap: ## Full first-time Fly.io setup (Tigris, secrets, deploy)
 	fly storage create --app $(FLY_APP) --name $(FLY_APP)-photos --public
 	@echo ""
 	@echo "==> Tigris secrets (AWS_*) have been set automatically."
+	@echo "==> Setting bucket CORS policy..."
+	$(MAKE) fly-cors
+	@echo ""
 	@echo "==> Now setting remaining secrets..."
 	@echo ""
 	fly secrets set --app $(FLY_APP) \
@@ -41,6 +44,19 @@ fly-seed: ## Push seed data to Fly.io via the API
 .PHONY: fly-unseed
 fly-unseed: ## Remove seed data from Fly.io
 	fly ssh console --app $(FLY_APP) -C "/app/bin/radar eval Radar.Release.unseed"
+
+.PHONY: fly-cors
+fly-cors: ## Set CORS policy on the Tigris bucket
+	$(eval CORS := $(shell mktemp))
+	@echo '{"CORSRules":[{"AllowedOrigins":["https://$(FLY_APP).fly.dev"],"AllowedMethods":["GET"],"AllowedHeaders":["*"],"MaxAgeSeconds":3600}]}' > $(CORS)
+	AWS_ACCESS_KEY_ID=$$(fly ssh console --app $(FLY_APP) -C "printenv AWS_ACCESS_KEY_ID" -q) \
+	AWS_SECRET_ACCESS_KEY=$$(fly ssh console --app $(FLY_APP) -C "printenv AWS_SECRET_ACCESS_KEY" -q) \
+	aws s3api put-bucket-cors \
+		--endpoint-url https://fly.storage.tigris.dev \
+		--region auto \
+		--bucket $(FLY_APP)-photos \
+		--cors-configuration file://$(CORS)
+	@rm -f $(CORS)
 
 .PHONY: logs
 logs: ## Tail Fly.io logs

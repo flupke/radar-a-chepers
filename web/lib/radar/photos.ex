@@ -93,21 +93,12 @@ defmodule Radar.Photos do
     create_photo(attrs_with_data)
   end
 
-  @doc """
-  Gets the presigned URL for a photo from Tigris storage.
-  Returns {:ok, url} or {:error, reason}
-  """
   def get_photo_url(photo) do
-    case s3_client().presigned_url(:get, photo.tigris_key, expires_in: 3600) do
-      {:ok, %{url: url}} -> {:ok, url}
-      {:ok, url} when is_binary(url) -> {:ok, url}
-      error -> error
-    end
+    {:ok, s3_client().public_url(photo.tigris_key)}
   end
 
   def get_photo_url!(photo) do
-    {:ok, url} = get_photo_url(photo)
-    url
+    s3_client().public_url(photo.tigris_key)
   end
 
   @doc """

@@ -1,7 +1,7 @@
 defmodule Radar.MockS3Client do
   @moduledoc """
   Mock S3 client for development and testing that implements the S3 behaviour.
-  Returns fake presigned URLs without making any external requests.
+  Returns local paths without making any external requests.
   """
 
   @behaviour Radar.S3
@@ -25,12 +25,9 @@ defmodule Radar.MockS3Client do
   }
 
   @impl true
-  def presigned_url(_method, key, _opts) do
-    url =
-      Enum.find_value(@seed_images, fn {prefix, path} ->
-        if String.contains?(key, prefix), do: path
-      end) || "/images/seed_1.jpg"
-
-    {:ok, url}
+  def public_url(key) do
+    Enum.find_value(@seed_images, fn {prefix, path} ->
+      if String.contains?(key, prefix), do: path
+    end) || "/images/seed_1.jpg"
   end
 end
