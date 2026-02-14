@@ -106,8 +106,8 @@ defmodule RadarWeb.InfractionLive do
 
             <!-- QR Code -->
             <div class="p-5 border-b border-base-300 flex flex-col items-center">
-              <div class="w-36 h-36 [&>svg]:w-full [&>svg]:h-full">
-                {qr_code_svg(@infraction.id)}
+              <div class="w-36 h-36">
+                <img src={qr_code_data_uri(@infraction.id)} class="w-full h-full" />
               </div>
               <p class="opacity-50 text-xs mt-2">Scan for mobile access</p>
             </div>
@@ -157,22 +157,12 @@ defmodule RadarWeb.InfractionLive do
     end
   end
 
-  def qr_code_svg(infraction_id) do
+  defp qr_code_data_uri(infraction_id) do
     url = RadarWeb.Endpoint.url() <> "/infractions/#{infraction_id}"
 
     case url |> QRCode.create() |> QRCode.render(:svg) do
-      {:ok, svg} ->
-        svg =
-          Regex.replace(
-            ~r/(<svg)\s+width="(\d+)"\s+height="(\d+)"/,
-            svg,
-            ~S(\1 viewBox="0 0 \2 \3")
-          )
-
-        {:safe, svg}
-
-      _ ->
-        ""
+      {:ok, svg} -> "data:image/svg+xml;base64,#{Base.encode64(svg)}"
+      _ -> ""
     end
   end
 end

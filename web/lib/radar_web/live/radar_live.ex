@@ -79,9 +79,9 @@ defmodule RadarWeb.RadarLive do
                   <div class="text-sm opacity-60 uppercase tracking-wide mb-2">CASE DETAILS</div>
                   <.link
                     navigate={~p"/infractions/#{@current_infraction.id}"}
-                    class="block w-32 h-32 [&>svg]:w-full [&>svg]:h-full pointer-events-auto"
+                    class="block w-32 h-32 pointer-events-auto"
                   >
-                    {qr_code_svg(@current_infraction.id)}
+                    <img src={qr_code_data_uri(@current_infraction.id)} class="w-full h-full" />
                   </.link>
                 </div>
               </div>
@@ -133,22 +133,12 @@ defmodule RadarWeb.RadarLive do
     assign(socket, :timer_ref, ref)
   end
 
-  def qr_code_svg(infraction_id) do
+  defp qr_code_data_uri(infraction_id) do
     url = RadarWeb.Endpoint.url() <> "/infractions/#{infraction_id}"
 
     case url |> QRCode.create() |> QRCode.render(:svg) do
-      {:ok, svg} ->
-        svg =
-          Regex.replace(
-            ~r/(<svg)\s+width="(\d+)"\s+height="(\d+)"/,
-            svg,
-            ~S(\1 viewBox="0 0 \2 \3")
-          )
-
-        {:safe, svg}
-
-      _ ->
-        ""
+      {:ok, svg} -> "data:image/svg+xml;base64,#{Base.encode64(svg)}"
+      _ -> ""
     end
   end
 end
