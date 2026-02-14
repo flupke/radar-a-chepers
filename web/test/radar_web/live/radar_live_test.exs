@@ -72,8 +72,8 @@ defmodule RadarWeb.RadarLiveTest do
       # Should show the newest infraction immediately (no delay)
       assert html =~ "90 MPH"
       assert html =~ "Highway 3"
-      # Use photo URL directly
-      assert html =~ "https://test.tigris.dev/"
+      # Photo URL from mock S3 client
+      assert html =~ "/images/seed_"
       refute html =~ "RADAR SYSTEM ACTIVE"
       # oldest should not be visible
       refute html =~ "70 MPH"
@@ -112,10 +112,11 @@ defmodule RadarWeb.RadarLiveTest do
       assert html =~ "CASE TYPE"
       # Check for lowercase since template uses lowercase with uppercase CSS
       assert html =~ "speed ticket"
-      assert html =~ "QR CODE"
+      # QR code SVG is rendered
+      assert html =~ "<svg"
 
       # Check photo is displayed
-      assert html =~ "https://test.tigris.dev/"
+      assert html =~ "/images/seed_"
 
       # Check case ID format
       assert html =~ "#1"

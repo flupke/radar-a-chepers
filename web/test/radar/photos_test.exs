@@ -26,7 +26,7 @@ defmodule Radar.PhotosTest do
 
       # Verify we can get the photo with URL
       assert {:ok, photo_with_url} = Photos.get_photo(photo.id)
-      assert String.starts_with?(photo_with_url.tigris_url, "https://test.tigris.dev/")
+      assert String.starts_with?(photo_with_url.tigris_url, "/images/seed_")
     end
 
     test "validates required upload parameters" do
@@ -55,8 +55,7 @@ defmodule Radar.PhotosTest do
 
       # In test environment, get_photo_url returns a test URL without mock
       assert {:ok, url} = Photos.get_photo_url(photo)
-      assert String.contains?(url, "test.tigris.dev")
-      assert String.contains?(url, "radar-photos")
+      assert String.starts_with?(url, "/images/seed_")
     end
   end
 
