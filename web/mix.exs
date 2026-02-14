@@ -39,7 +39,7 @@ defmodule Radar.MixProject do
       {:ecto_sql, "~> 3.13"},
       {:ecto_sqlite3, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
-      {:phoenix_live_reload, "~> 1.2", only: :dev},
+      {:phoenix_live_reload, "~> 1.6", only: :dev},
       {:phoenix_live_view, "~> 1.1.0-rc.0"},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:phoenix_live_dashboard, "~> 0.8.3"},
@@ -65,7 +65,8 @@ defmodule Radar.MixProject do
       {:qr_code, "~> 3.1"},
       {:sweet_xml, "~> 0.6"},
       {:mox, "~> 1.0", only: :test},
-      {:tidewave, "~> 0.5", only: :dev}
+      {:tidewave, "~> 0.5", only: :dev},
+      {:igniter, "~> 0.7"}
     ]
   end
 
