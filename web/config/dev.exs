@@ -62,6 +62,9 @@ config :radar, RadarWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :radar, dev_routes: true
 
+# Use mock S3 client in development to avoid external dependencies
+config :radar, :s3_client, Radar.MockS3Client
+
 # Tigris S3-compatible storage configuration
 config :radar,
   tigris_bucket: System.get_env("TIGRIS_BUCKET") || "radar-dev",
