@@ -1,0 +1,51 @@
+FLY_APP = rshep
+
+.PHONY: bootstrap
+bootstrap: ## Full first-time Fly.io setup (Tigris, secrets, deploy)
+	@echo "==> Checking fly CLI..."
+	@command -v fly >/dev/null 2>&1 || { echo "Error: fly CLI not installed. See https://fly.io/docs/flyctl/install/"; exit 1; }
+	@echo ""
+	@echo "==> Creating Fly app..."
+	fly apps create $(FLY_APP) || true
+	@echo ""
+	@echo "==> Creating Tigris storage bucket..."
+	fly storage create --app $(FLY_APP) --name $(FLY_APP)-photos --public
+	@echo ""
+	@echo "==> Tigris secrets (AWS_*) have been set automatically."
+	@echo "==> Now setting remaining secrets..."
+	@echo ""
+	fly secrets set --app $(FLY_APP) \
+		SECRET_KEY_BASE=$$(mix phx.gen.secret) \
+		RADAR_API_KEY=$$(openssl rand -hex 32)
+	@echo ""
+	@echo "==> Deploying..."
+	fly deploy --app $(FLY_APP)
+	@echo ""
+	@echo "==> Done! Your app is live at https://$(FLY_APP).fly.dev"
+	@echo "==> API key was auto-generated. Retrieve it with: fly secrets list --app $(FLY_APP)"
+
+.PHONY: deploy
+deploy: ## Deploy to Fly.io
+	fly deploy --app $(FLY_APP)
+
+.PHONY: console
+console: ## Open a remote IEx console on Fly
+	fly ssh console --app $(FLY_APP) -C "/app/bin/radar remote"
+
+.PHONY: fly-seed
+fly-seed: ## Push seed data to Fly.io via the API
+	mix radar.fly_seed \
+		--url https://$(FLY_APP).fly.dev \
+		--api-key $$(fly ssh console --app $(FLY_APP) -C "printenv RADAR_API_KEY" -q)
+
+.PHONY: fly-unseed
+fly-unseed: ## Remove seed data from Fly.io
+	fly ssh console --app $(FLY_APP) -C "/app/bin/radar eval Radar.Release.unseed"
+
+.PHONY: logs
+logs: ## Tail Fly.io logs
+	fly logs --app $(FLY_APP)
+
+.PHONY: secrets
+secrets: ## List Fly.io secrets
+	fly secrets list --app $(FLY_APP)
