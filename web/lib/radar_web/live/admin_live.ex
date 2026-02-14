@@ -32,7 +32,15 @@ defmodule RadarWeb.AdminLive do
   def render(assigns) do
     ~H"""
     <div class="max-w-2xl mx-auto p-6 space-y-8">
-      <h1 class="text-3xl font-bold">Radar Configuration</h1>
+      <div class="flex justify-between items-center">
+        <h1 class="text-3xl font-bold">Radar Configuration</h1>
+        <div class="flex items-center gap-3">
+          <span class="text-sm opacity-70">{@current_admin.email}</span>
+          <.link href={~p"/auth/logout"} method="delete" class="btn btn-sm btn-outline">
+            Sign out
+          </.link>
+        </div>
+      </div>
 
       <div class="card bg-base-200 shadow-lg">
         <div class="card-body">

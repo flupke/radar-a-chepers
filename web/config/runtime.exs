@@ -20,6 +20,18 @@ if System.get_env("PHX_SERVER") do
   config :radar, RadarWeb.Endpoint, server: true
 end
 
+# Google OAuth for admin (all environments, runtime)
+if client_id = System.get_env("GOOGLE_CLIENT_ID") do
+  config :ueberauth, Ueberauth.Strategy.Google.OAuth,
+    client_id: client_id,
+    client_secret: System.fetch_env!("GOOGLE_CLIENT_SECRET")
+end
+
+if admin_emails = System.get_env("ADMIN_EMAILS") do
+  config :radar, :admin_emails,
+    admin_emails |> String.split(",") |> Enum.map(&String.trim/1)
+end
+
 if config_env() == :prod do
   database_path =
     System.get_env("DATABASE_PATH") ||

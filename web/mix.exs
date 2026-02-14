@@ -41,7 +41,9 @@ defmodule Radar.MixProject do
           Radar.S3,
           # Context functions called from controllers (invisible to tracer)
           {Radar.Photos, :create_photo, 1},
-          {Radar.Photos, :get_photo_url, 2}
+          {Radar.Photos, :get_photo_url, 2},
+          # LiveView on_mount hooks (invoked by framework)
+          RadarWeb.AdminAuth
         ]
       ]
     ]
@@ -106,7 +108,9 @@ defmodule Radar.MixProject do
       {:mix_unused, "~> 0.4", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:ueberauth, "~> 0.10"},
+      {:ueberauth_google, "~> 0.12"}
     ]
   end
 

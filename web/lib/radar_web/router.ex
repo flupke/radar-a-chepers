@@ -14,12 +14,25 @@ defmodule RadarWeb.Router do
     plug :accepts, ["json"]
   end
 
+  scope "/auth", RadarWeb do
+    pipe_through :browser
+
+    get "/:provider", AuthController, :request
+    get "/:provider/callback", AuthController, :callback
+    delete "/logout", AuthController, :delete
+  end
+
   scope "/", RadarWeb do
     pipe_through :browser
 
-    live "/", RadarLive
-    live "/infractions/:id", InfractionLive
-    live "/admin", AdminLive
+    live_session :public do
+      live "/", RadarLive
+      live "/infractions/:id", InfractionLive
+    end
+
+    live_session :admin, on_mount: RadarWeb.AdminAuth do
+      live "/admin", AdminLive
+    end
   end
 
   # API routes with JSON responses

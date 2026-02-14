@@ -1,4 +1,5 @@
 FLY_APP = rshep
+GCP_PROJECT = radar-a-chepers
 
 .PHONY: bootstrap
 bootstrap: ## Full first-time Fly.io setup (Tigris, secrets, deploy)
@@ -23,6 +24,20 @@ bootstrap: ## Full first-time Fly.io setup (Tigris, secrets, deploy)
 	@echo ""
 	@echo "==> Done! Your app is live at https://$(FLY_APP).fly.dev"
 	@echo "==> API key was auto-generated. Retrieve it with: fly secrets list --app $(FLY_APP)"
+
+.PHONY: setup-google-oauth
+setup-google-oauth: ## Create Google OAuth credentials and set Fly secrets
+	@read -p "Enter Client ID: " client_id && \
+		read -p "Enter Client Secret: " client_secret && \
+		read -p "Enter comma-separated admin emails: " emails && \
+		fly secrets set --app $(FLY_APP) \
+			GOOGLE_CLIENT_ID="$$client_id" \
+			GOOGLE_CLIENT_SECRET="$$client_secret" \
+			ADMIN_EMAILS="$$emails" && \
+		echo "" && \
+		echo "==> Fly secrets set. For local dev, add to your shell:" && \
+		echo "    export GOOGLE_CLIENT_ID=$$client_id" && \
+		echo "    export GOOGLE_CLIENT_SECRET=$$client_secret"
 
 .PHONY: deploy
 deploy: ## Deploy to Fly.io

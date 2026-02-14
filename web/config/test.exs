@@ -37,3 +37,10 @@ config :phoenix, :plug_init_mode, :runtime
 # Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
+
+# Google OAuth stubs for tests
+config :ueberauth, Ueberauth.Strategy.Google.OAuth,
+  client_id: "test-client-id",
+  client_secret: "test-client-secret"
+
+config :radar, :admin_emails, ["admin@test.com"]

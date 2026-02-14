@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+FLY_APP=rshep
+
+# Fetch Google OAuth secrets from Fly if not already set
+if [ -z "${GOOGLE_CLIENT_ID:-}" ] || [ -z "${GOOGLE_CLIENT_SECRET:-}" ]; then
+  echo "==> Fetching Google OAuth secrets from Fly ($FLY_APP)..."
+  export GOOGLE_CLIENT_ID=$(fly ssh console --app "$FLY_APP" -C "printenv GOOGLE_CLIENT_ID" -q)
+  export GOOGLE_CLIENT_SECRET=$(fly ssh console --app "$FLY_APP" -C "printenv GOOGLE_CLIENT_SECRET" -q)
+fi
+
 # Trap EXIT to kill background processes
 cleanup() { kill 0 2>/dev/null; }
 trap cleanup EXIT
