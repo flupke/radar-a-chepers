@@ -64,7 +64,8 @@ defmodule Radar.MixProject do
       {:hackney, "~> 1.9"},
       {:qr_code, "~> 3.1"},
       {:sweet_xml, "~> 0.6"},
-      {:mox, "~> 1.0", only: :test}
+      {:mox, "~> 1.0", only: :test},
+      {:tidewave, "~> 0.5", only: :dev}
     ]
   end
 
