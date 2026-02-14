@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Trap EXIT to kill background processes
+cleanup() { kill 0 2>/dev/null; }
+trap cleanup EXIT
+
+# Start the web app
+cd web
+mix ecto.create --quiet 2>/dev/null || true
+mix ecto.migrate --quiet
+mix phx.server &
+cd ..
+
+# Create infractions dir and start the uploader
+mkdir -p /tmp/infractions
+cd uploader
+RUST_LOG=info cargo run --bin uploader -- \
+  --test-mode \
+  --api-endpoint=http://localhost:4000 \
+  --api-key=radar-dev-key \
+  --infractions-dir=/tmp/infractions

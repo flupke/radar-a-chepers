@@ -72,8 +72,8 @@ defmodule RadarWeb.RadarLiveTest do
       # Should show the newest infraction immediately (no delay)
       assert html =~ "90 MPH"
       assert html =~ "Highway 3"
-      # Photo URL from mock S3 client
-      assert html =~ "/images/seed_"
+      # Photo URL from mock S3 client (stored in ETS, served via dev route)
+      assert html =~ "/dev/photos/"
       refute html =~ "RADAR SYSTEM ACTIVE"
       # oldest should not be visible
       refute html =~ "70 MPH"
@@ -115,8 +115,8 @@ defmodule RadarWeb.RadarLiveTest do
       # QR code is rendered as base64 data URI
       assert html =~ "data:image/svg+xml;base64,"
 
-      # Check photo is displayed
-      assert html =~ "/images/seed_"
+      # Check photo is displayed (stored in ETS, served via dev route)
+      assert html =~ "/dev/photos/"
 
       # Check case ID is a UUID
       assert html =~ ~r/#[0-9a-f]{8}-[0-9a-f]{4}-/

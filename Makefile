@@ -18,5 +18,8 @@ run-web:
 		mix ecto.migrate && \
 		mix phx.server
 
+integration-test:
+	bin/integration-test
+
 $(RADAR_BINARY): $(RADAR_SOURCES)
 	cd radar && cargo espflash flash

@@ -9,18 +9,18 @@ enum TargetParseError {
 }
 
 #[derive(Debug, defmt::Format)]
-struct Target {
+pub struct Target {
     // X coordinate in mm
-    x: i16,
+    pub x: i16,
 
     // Y coordinate in mm
-    y: i16,
+    pub y: i16,
 
-    // Speed in cm/s
-    speed: i16,
+    // Speed in km/h
+    pub speed: i16,
 
     // Distance resolution in mm
-    distance_resolution: u16,
+    pub distance_resolution: u16,
 }
 
 impl TryFrom<&[u8]> for Target {
@@ -65,6 +65,10 @@ impl TargetsList {
             .map(|t| t.as_ref().map_or(0, |t| -t.speed))
             .max()
             .unwrap_or(0)
+    }
+
+    pub fn targets(&self) -> &[Option<Target>] {
+        &self.targets
     }
 }
 

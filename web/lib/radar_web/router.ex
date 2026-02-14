@@ -19,6 +19,7 @@ defmodule RadarWeb.Router do
 
     live "/", RadarLive
     live "/infractions/:id", InfractionLive
+    live "/admin", AdminLive
   end
 
   # API routes with JSON responses
@@ -48,5 +49,7 @@ defmodule RadarWeb.Router do
       live_dashboard "/dashboard", metrics: RadarWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
+
+    get "/dev/photos/:key", RadarWeb.Dev.MockS3Controller, :show
   end
 end

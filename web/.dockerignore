@@ -39,6 +39,12 @@
 # Generated on crash by the VM
 erl_crash.dump
 
+# Dev seed data and local databases
+/priv/repo/seeds.exs
+*.db
+*.db-shm
+*.db-wal
+
 # Static artifacts - These should be fetched and built inside the Docker image
 # https://hexdocs.pm/phoenix/Mix.Tasks.Phx.Gen.Release.html#module-docker
 /assets/node_modules/

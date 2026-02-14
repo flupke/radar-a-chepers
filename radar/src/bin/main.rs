@@ -7,7 +7,7 @@
 )]
 
 const EVENTS_PREFIX: &str = "EVENTS: ";
-const MAX_SPEED_PREFIX: &str = "MAX_SPEED: ";
+const TARGET_PREFIX: &str = "TARGET: ";
 
 use bt_hci::controller::ExternalController;
 use embassy_executor::Spawner;
@@ -92,8 +92,10 @@ async fn reader(mut rx: UartRx<'static, Async>) {
                 match TargetsList::try_from(&rbuf[..offset]) {
                     Ok(targets) => {
                         defmt::debug!("Targets: {:#?}", targets);
-                        let max_speed = targets.max_speed();
-                        defmt::info!("{}{}{}", EVENTS_PREFIX, MAX_SPEED_PREFIX, max_speed);
+                        for target in targets.targets().iter().flatten() {
+                            let speed = -target.speed;
+                            defmt::info!("{}{}{} {} {}", EVENTS_PREFIX, TARGET_PREFIX, speed, target.x, target.y);
+                        }
                     }
                     Err(err) => {
                         defmt::error!("Error parsing targets: {:?}", err);
