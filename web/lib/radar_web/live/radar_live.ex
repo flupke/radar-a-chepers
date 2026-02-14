@@ -3,7 +3,6 @@ defmodule RadarWeb.RadarLive do
 
   alias Radar.Infractions
 
-  # 8 seconds in milliseconds
   @default_display_duration 8000
 
   def mount(_params, _session, socket) do
@@ -23,7 +22,6 @@ defmodule RadarWeb.RadarLive do
       |> assign(:all_infractions, recent_infractions)
       |> stream(:infractions, recent_infractions)
 
-    # Start the auto-advance timer if we have infractions
     socket =
       if recent_infractions != [] do
         schedule_next_photo(socket)
@@ -32,6 +30,88 @@ defmodule RadarWeb.RadarLive do
       end
 
     {:ok, socket}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div class="fixed inset-0 bg-base-300 text-base-content font-mono">
+      <%= if @infractions_empty? do %>
+        <div class="flex items-center justify-center h-full">
+          <div class="text-center">
+            <div class="text-6xl mb-4">📷</div>
+            <div class="text-2xl font-bold">RADAR SYSTEM ACTIVE</div>
+            <div class="text-lg mt-2 opacity-60">Waiting for infractions...</div>
+          </div>
+        </div>
+      <% else %>
+        <%= if @current_infraction do %>
+          <div class="relative w-full h-full">
+            <img
+              src={
+                case Radar.Photos.get_photo_url(@current_infraction.photo) do
+                  {:ok, url} -> url
+                  _ -> "/images/placeholder.jpg"
+                end
+              }
+              alt="Speed camera capture"
+              class="w-full h-full object-cover"
+            />
+
+            <div class="absolute inset-0 pointer-events-none">
+              <div class="absolute top-0 left-0 right-0 bg-neutral/80 px-8 py-4">
+                <div class="flex justify-between items-center text-xl">
+                  <div class="badge badge-error badge-lg font-bold">SPEED VIOLATION</div>
+                  <div class="text-sm opacity-70">
+                    {Calendar.strftime(@current_infraction.datetime_taken, "%m/%d/%Y %I:%M:%S %p")}
+                  </div>
+                </div>
+              </div>
+
+              <div class="absolute bottom-0 left-0 right-0 bg-neutral/80 px-8 py-6">
+                <div class="grid grid-cols-3 gap-8">
+                  <div class="space-y-2">
+                    <div class="text-sm opacity-60 uppercase tracking-wide">RECORDED SPEED</div>
+                    <div class="text-4xl font-bold">
+                      {@current_infraction.recorded_speed} MPH
+                    </div>
+                    <div class="text-sm opacity-60 uppercase tracking-wide">SPEED LIMIT</div>
+                    <div class="text-2xl font-bold">
+                      {@current_infraction.authorized_speed} MPH
+                    </div>
+                    <div class="text-sm opacity-60 uppercase tracking-wide">VIOLATION</div>
+                    <div class="text-xl font-bold text-error">
+                      +{@current_infraction.recorded_speed - @current_infraction.authorized_speed} MPH
+                    </div>
+                  </div>
+
+                  <div class="space-y-2">
+                    <div class="text-sm opacity-60 uppercase tracking-wide">LOCATION</div>
+                    <div class="text-lg font-bold">{@current_infraction.location}</div>
+                    <div class="text-sm opacity-60 uppercase tracking-wide">CASE TYPE</div>
+                    <div class="text-lg font-bold uppercase">
+                      {String.replace(@current_infraction.type, "_", " ")}
+                    </div>
+                    <div class="text-sm opacity-60 uppercase tracking-wide">CASE ID</div>
+                    <div class="text-lg font-bold">#{@current_infraction.id}</div>
+                  </div>
+
+                  <div class="flex flex-col items-end">
+                    <div class="text-sm opacity-60 uppercase tracking-wide mb-2">CASE DETAILS</div>
+                    <.link
+                      navigate={~p"/infractions/#{@current_infraction.id}"}
+                      class="block w-32 h-32 [&>svg]:w-full [&>svg]:h-full pointer-events-auto"
+                    >
+                      {qr_code_svg(@current_infraction.id)}
+                    </.link>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+    """
   end
 
   def handle_info({:new_infraction, infraction}, socket) do
@@ -50,7 +130,6 @@ defmodule RadarWeb.RadarLive do
   end
 
   def handle_info(:advance_photo, socket) do
-    # Get all infractions from the assign and advance to next
     all_infractions = socket.assigns.all_infractions
 
     if all_infractions != [] do
@@ -73,7 +152,6 @@ defmodule RadarWeb.RadarLive do
   end
 
   defp maybe_start_timer(socket) do
-    # Only start timer if we don't have infractions yet and now we do
     if socket.assigns.infractions_empty? do
       schedule_next_photo(socket)
     else
