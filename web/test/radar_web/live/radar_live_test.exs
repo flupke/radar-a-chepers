@@ -162,21 +162,21 @@ defmodule RadarWeb.RadarLiveTest do
       assert render(view) =~ "Location 3"
 
       # Simulate timer advance message
-      send(view.pid, :advance_photo)
+      send(view.pid, :advance_infraction)
 
       # Should cycle to next infraction (Location 2)
       assert render(view) =~ "80 MPH"
       assert render(view) =~ "Location 2"
 
       # Advance again
-      send(view.pid, :advance_photo)
+      send(view.pid, :advance_infraction)
 
       # Should cycle to next infraction (Location 1)
       assert render(view) =~ "70 MPH"
       assert render(view) =~ "Location 1"
 
       # Advance again - should wrap back to newest
-      send(view.pid, :advance_photo)
+      send(view.pid, :advance_infraction)
 
       # Should wrap back to newest infraction (Location 3)
       assert render(view) =~ "90 MPH"
@@ -218,7 +218,7 @@ defmodule RadarWeb.RadarLiveTest do
 
       Enum.with_index(expected_sequence, 1)
       |> Enum.each(fn {{expected_speed, expected_location}, step} ->
-        send(view.pid, :advance_photo)
+        send(view.pid, :advance_infraction)
 
         rendered = render(view)
         assert rendered =~ expected_speed, "Step #{step}: Expected speed #{expected_speed}"
@@ -235,7 +235,7 @@ defmodule RadarWeb.RadarLiveTest do
       assert render(view) =~ "RADAR SYSTEM ACTIVE"
 
       # Send advance message - should not crash
-      send(view.pid, :advance_photo)
+      send(view.pid, :advance_infraction)
 
       # Should still show empty state
       assert render(view) =~ "RADAR SYSTEM ACTIVE"
@@ -298,7 +298,7 @@ defmodule RadarWeb.RadarLiveTest do
       assert render(view) =~ "Old Location 2"
 
       # Advance to show first infraction
-      send(view.pid, :advance_photo)
+      send(view.pid, :advance_infraction)
       assert render(view) =~ "70 MPH"
       assert render(view) =~ "Old Location 1"
 
@@ -424,7 +424,7 @@ defmodule RadarWeb.RadarLiveTest do
       ]
 
       Enum.each(indices_and_advances, fn {expected_speed, expected_location} ->
-        send(view.pid, :advance_photo)
+        send(view.pid, :advance_infraction)
 
         rendered = render(view)
         assert rendered =~ expected_speed, "Expected speed #{expected_speed}"
@@ -449,8 +449,8 @@ defmodule RadarWeb.RadarLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       # Advance to middle of cycling
-      send(view.pid, :advance_photo)
-      send(view.pid, :advance_photo)
+      send(view.pid, :advance_infraction)
+      send(view.pid, :advance_infraction)
       assert render(view) =~ "60 MPH"
       assert render(view) =~ "Initial Location 1"
 
