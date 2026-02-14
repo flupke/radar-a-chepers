@@ -93,12 +93,20 @@ defmodule Radar.Photos do
     create_photo(attrs_with_data)
   end
 
-  def get_photo_url(photo) do
-    {:ok, s3_client().public_url(photo.tigris_key)}
+  def get_photo_url(photo, opts \\ []) do
+    s3_opts =
+      if opts[:download] do
+        [query_params: [{"response-content-disposition", "attachment; filename=\"#{photo.filename}\""}]]
+      else
+        []
+      end
+
+    s3_client().presigned_url(photo.tigris_key, s3_opts)
   end
 
-  def get_photo_url!(photo) do
-    s3_client().public_url(photo.tigris_key)
+  def get_photo_url!(photo, opts \\ []) do
+    {:ok, url} = get_photo_url(photo, opts)
+    url
   end
 
   @doc """

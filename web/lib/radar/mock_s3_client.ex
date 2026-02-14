@@ -25,9 +25,12 @@ defmodule Radar.MockS3Client do
   }
 
   @impl true
-  def public_url(key) do
-    Enum.find_value(@seed_images, fn {prefix, path} ->
-      if String.contains?(key, prefix), do: path
-    end) || "/images/seed_1.jpg"
+  def presigned_url(key, _opts \\ []) do
+    url =
+      Enum.find_value(@seed_images, fn {prefix, path} ->
+        if String.contains?(key, prefix), do: path
+      end) || "/images/seed_1.jpg"
+
+    {:ok, url}
   end
 end
