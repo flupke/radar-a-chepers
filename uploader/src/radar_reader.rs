@@ -6,14 +6,14 @@ use tokio::time::sleep;
 
 use crate::{actor::Actor, infraction_recorder::InfractionRecorder};
 
-pub(crate) struct RadarReader {
+pub struct RadarReader {
     elf_path: Utf8PathBuf,
     serial_port: String,
     infraction_recorder: InfractionRecorder,
 }
 
 impl RadarReader {
-    pub(crate) fn new(
+    pub fn new(
         elf_path: Utf8PathBuf,
         serial_port: String,
         infraction_recorder: InfractionRecorder,

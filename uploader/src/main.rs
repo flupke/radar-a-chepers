@@ -1,14 +1,12 @@
-mod actor;
-mod infraction_recorder;
-mod infraction_uploader;
-mod radar_reader;
-
 use camino::Utf8PathBuf;
 use clap::Parser;
 use env_logger::Env;
 use eyre::{Result, eyre};
 
-use crate::{actor::Actor, infraction_recorder::InfractionRecorder, infraction_uploader::InfractionUploader, radar_reader::RadarReader};
+use uploader::{
+    actor::Actor, infraction_recorder::InfractionRecorder,
+    infraction_uploader::InfractionUploader, radar_reader::RadarReader,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -48,11 +46,21 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     args.check()?;
 
-    let infraction_uploader = InfractionUploader::new(args.infractions_dir).start();
-    let infraction_recorder = InfractionRecorder::new(25, args.infractions_dir, infraction_uploader)
-    let radar_reader =
-        RadarReader::new(args.elf_path, args.serial_port, infraction_recorder).start();
-    radar_reader.join().await;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let infraction_uploader = InfractionUploader::new(
+                args.infractions_dir.clone(),
+                args.api_endpoint,
+                args.api_key,
+            );
+            let infraction_recorder =
+                InfractionRecorder::new(25, args.infractions_dir, &infraction_uploader);
+            let radar_reader =
+                RadarReader::new(args.elf_path, args.serial_port, infraction_recorder).start();
+            radar_reader.join().await;
+        })
+        .await;
 
     Ok(())
 }

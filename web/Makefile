@@ -38,6 +38,12 @@ fly-seed: ## Push seed data to Fly.io via the API
 		--url https://$(FLY_APP).fly.dev \
 		--api-key $$(fly ssh console --app $(FLY_APP) -C "printenv RADAR_API_KEY" -q)
 
+.PHONY: fly-seed-rs
+fly-seed-rs: ## Push seed data to Fly.io via the Rust uploader pipeline
+	cd ../uploader && cargo run --bin seed -- \
+		--api-endpoint https://$(FLY_APP).fly.dev \
+		--api-key $$(fly ssh console --app $(FLY_APP) -C "printenv RADAR_API_KEY" -q)
+
 .PHONY: fly-unseed
 fly-unseed: ## Remove seed data from Fly.io
 	fly ssh console --app $(FLY_APP) -C "/app/bin/radar eval Radar.Release.unseed"

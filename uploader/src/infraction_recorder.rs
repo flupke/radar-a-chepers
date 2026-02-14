@@ -6,23 +6,26 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     actor::{Actor, ActorPort},
-    infraction_uploader::InfractionUploader,
+    infraction_uploader::{InfractionUploader, InfractionUploaderCommand},
 };
 
-pub(crate) struct InfractionRecorder {
+pub struct InfractionRecorder {
     port: ActorPort<InfractionRecorderCommand>,
-    infraction_uploader: InfractionUploader,
 }
 
 impl InfractionRecorder {
-    pub(crate) fn new(
+    pub fn new(
         authorized_speed: i16,
         photos_dir: Utf8PathBuf,
-        infraction_uploader: InfractionUploader,
+        infraction_uploader: &InfractionUploader,
     ) -> Self {
         Self {
-            port: InfractionRecorderInner::new(authorized_speed, photos_dir).start(),
-            infraction_uploader,
+            port: InfractionRecorderInner::new(
+                authorized_speed,
+                photos_dir,
+                infraction_uploader.port.clone(),
+            )
+            .start(),
         }
     }
 
@@ -41,11 +44,11 @@ enum InfractionRecorderCommand {
     ProcessLogMessage(oneshot::Sender<()>, String),
 }
 
-#[derive(Default)]
 struct InfractionRecorderInner {
     authorized_speed: i16,
     last_infraction: Option<Infraction>,
     photos_dir: Utf8PathBuf,
+    uploader_port: ActorPort<InfractionUploaderCommand>,
 }
 
 impl Actor for InfractionRecorderInner {
@@ -72,11 +75,16 @@ impl Actor for InfractionRecorderInner {
 impl InfractionRecorderInner {
     const MAX_SPEED_PREFIX: &str = "EVENTS: MAX_SPEED: ";
 
-    fn new(authorized_speed: i16, photos_dir: Utf8PathBuf) -> Self {
+    fn new(
+        authorized_speed: i16,
+        photos_dir: Utf8PathBuf,
+        uploader_port: ActorPort<InfractionUploaderCommand>,
+    ) -> Self {
         Self {
             authorized_speed,
             photos_dir,
-            ..Default::default()
+            uploader_port,
+            last_infraction: None,
         }
     }
 
@@ -101,6 +109,10 @@ impl InfractionRecorderInner {
             };
             log::info!("Infraction: {infraction:#?}");
             self.take_picture(&infraction)?;
+            infraction.save_infraction_json(&self.photos_dir)?;
+            let _ = self
+                .uploader_port
+                .send(InfractionUploaderCommand::NotifyInfraction);
             self.last_infraction = Some(infraction);
         }
         Ok(())
@@ -134,11 +146,11 @@ impl InfractionRecorderInner {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Infraction {
-    recorded_speed: i16,
-    authorized_speed: i16,
-    location: String,
-    datetime_taken: DateTime<Utc>,
+pub struct Infraction {
+    pub recorded_speed: i16,
+    pub authorized_speed: i16,
+    pub location: String,
+    pub datetime_taken: DateTime<Utc>,
 }
 
 impl Infraction {
@@ -146,15 +158,15 @@ impl Infraction {
         self.datetime_taken.to_rfc3339()
     }
 
-    fn photo_path(&self, photos_dir: &Utf8Path) -> Utf8PathBuf {
+    pub fn photo_path(&self, photos_dir: &Utf8Path) -> Utf8PathBuf {
         photos_dir.join(format!("{}.jpg", self.base_name()))
     }
 
-    fn infraction_path(&self, photos_dir: &Utf8Path) -> Utf8PathBuf {
+    pub fn infraction_path(&self, photos_dir: &Utf8Path) -> Utf8PathBuf {
         photos_dir.join(format!("{}.json", self.base_name()))
     }
 
-    fn save_infraction_json(&self, photos_dir: &Utf8Path) -> Result<()> {
+    pub fn save_infraction_json(&self, photos_dir: &Utf8Path) -> Result<()> {
         let infraction_json = serde_json::to_string(self)?;
         std::fs::write(self.infraction_path(photos_dir), infraction_json)?;
         Ok(())

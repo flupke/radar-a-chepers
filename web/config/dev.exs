@@ -81,6 +81,9 @@ config :ex_aws, :s3,
   host: System.get_env("TIGRIS_ENDPOINT", "fly.storage.tigris.dev"),
   region: "auto"
 
+# API key for development seeding
+config :radar, api_keys: ["radar-dev-key"]
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 

@@ -17,7 +17,7 @@ type MonitorStore = Rc<Mutex<HashMap<MonitorId, Monitor>>>;
 
 /// An [Actor] runs in a tokio task and interacts with the outside world
 /// through commands.
-pub(crate) trait Actor: Sized + 'static {
+pub trait Actor: Sized + 'static {
     /// The type of commands this actor can receive.
     ///
     /// This associated type defines the message protocol for communicating
@@ -141,7 +141,7 @@ pub(crate) trait Actor: Sized + 'static {
     }
 }
 
-pub(crate) enum MonitorCommand {
+pub enum MonitorCommand {
     Monitor {
         monitor_id: MonitorId,
         response_sender: Option<oneshot::Sender<()>>,
@@ -198,7 +198,7 @@ impl Drop for MonitorGuard {
 static MONITOR_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct MonitorId(u64);
+pub struct MonitorId(u64);
 
 impl MonitorId {
     fn new() -> Self {
@@ -210,7 +210,7 @@ impl MonitorId {
 ///
 /// The actor task is aborted when the last clone of its [ActorPort] is dropped.
 #[derive(Debug)]
-pub(crate) struct ActorPort<CommandKind: 'static> {
+pub struct ActorPort<CommandKind: 'static> {
     abort_handle: AbortHandle,
     command_sender: mpsc::UnboundedSender<CommandKind>,
     monitor_sender: MonitorSender,
@@ -218,10 +218,7 @@ pub(crate) struct ActorPort<CommandKind: 'static> {
 
 impl<CommandKind: 'static> ActorPort<CommandKind> {
     /// Send a message to the actor.
-    pub(crate) fn send(
-        &self,
-        command: CommandKind,
-    ) -> Result<(), mpsc::error::SendError<CommandKind>> {
+    pub fn send(&self, command: CommandKind) -> Result<(), mpsc::error::SendError<CommandKind>> {
         self.command_sender.send(command)
     }
 
@@ -234,7 +231,7 @@ impl<CommandKind: 'static> ActorPort<CommandKind> {
     /// Returns a [MonitorId] that can be used to cancel the monitor. Note
     /// that the [ActorPort::demonitor] method must be called on the other
     /// port to remove the monitor.
-    pub(crate) async fn monitor<OtherCommandKind: 'static>(
+    pub async fn monitor<OtherCommandKind: 'static>(
         &self,
         other_port: &ActorPort<OtherCommandKind>,
         command: CommandKind,
@@ -271,7 +268,7 @@ impl<CommandKind: 'static> ActorPort<CommandKind> {
     }
 
     /// Wait for the actor to terminate.
-    pub(crate) async fn join(&self) {
+    pub async fn join(&self) {
         let (tx, rx) = oneshot::channel();
         let monitor = Box::new(move || {
             let _ = tx.send(());
@@ -290,18 +287,18 @@ impl<CommandKind: 'static> ActorPort<CommandKind> {
     }
 
     /// Abort the actor's event loop.
-    pub(crate) fn abort(&mut self) {
+    pub fn abort(&mut self) {
         self.abort_handle.abort();
     }
 }
 
-pub(crate) struct MonitorHandle<CommandKind: 'static> {
+pub struct MonitorHandle<CommandKind: 'static> {
     monitor_id: MonitorId,
     monitored_port: ActorPort<CommandKind>,
 }
 
 impl<CommandKind: 'static> MonitorHandle<CommandKind> {
-    pub(crate) fn cancel(self) {
+    pub fn cancel(self) {
         self.monitored_port.demonitor(self.monitor_id)
     }
 }
