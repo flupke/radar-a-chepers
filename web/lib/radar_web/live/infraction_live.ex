@@ -38,8 +38,8 @@ defmodule RadarWeb.InfractionLive do
             {format_short_datetime(@infraction.datetime_taken)}
           </div>
         </div>
-
-        <!-- Main Content -->
+        
+    <!-- Main Content -->
         <div class="flex-1 flex min-h-0">
           <!-- Photo -->
           <div class="flex-1 relative min-w-0">
@@ -52,8 +52,8 @@ defmodule RadarWeb.InfractionLive do
               VIOLATION
             </div>
           </div>
-
-          <!-- Sidebar -->
+          
+    <!-- Sidebar -->
           <div class="w-80 shrink-0 bg-base-200 border-l border-base-300 flex flex-col overflow-y-auto">
             <!-- Speed Stats -->
             <div class="stats stats-vertical shadow-none rounded-none border-b border-base-300">
@@ -77,12 +77,14 @@ defmodule RadarWeb.InfractionLive do
                 </div>
               </div>
             </div>
-
-            <!-- Case Info -->
+            
+    <!-- Case Info -->
             <div class="p-5 border-b border-base-300 space-y-3 text-sm">
               <div class="flex justify-between">
                 <span class="opacity-60">Case ID</span>
-                <span class="font-mono">#{String.pad_leading(to_string(@infraction.id), 6, "0")}</span>
+                <span class="font-mono">
+                  #{String.pad_leading(to_string(@infraction.id), 6, "0")}
+                </span>
               </div>
               <div class="flex justify-between">
                 <span class="opacity-60">Type</span>
@@ -92,7 +94,9 @@ defmodule RadarWeb.InfractionLive do
               </div>
               <div class="flex justify-between">
                 <span class="opacity-60">Date</span>
-                <span class="text-right max-w-[60%]">{format_datetime(@infraction.datetime_taken)}</span>
+                <span class="text-right max-w-[60%]">
+                  {format_datetime(@infraction.datetime_taken)}
+                </span>
               </div>
               <div class="flex justify-between">
                 <span class="opacity-60">Location</span>
@@ -103,16 +107,16 @@ defmodule RadarWeb.InfractionLive do
                 <span class="font-mono text-xs">{@infraction.photo.filename}</span>
               </div>
             </div>
-
-            <!-- QR Code -->
+            
+    <!-- QR Code -->
             <div class="p-5 border-b border-base-300 flex flex-col items-center">
               <div class="w-36 h-36">
                 <img src={qr_code_data_uri(@infraction.id)} class="w-full h-full" />
               </div>
               <p class="opacity-50 text-xs mt-2">Scan for mobile access</p>
             </div>
-
-            <!-- Actions -->
+            
+    <!-- Actions -->
             <div class="p-5 mt-auto">
               <a
                 href={Radar.Photos.get_photo_url!(@infraction.photo, download: true)}

@@ -3,8 +3,6 @@ defmodule Radar.InfractionsFixtures do
   This module defines test fixtures for Infractions.
   """
   alias Radar.Infractions
-  alias Radar.Repo
-  alias Radar.Infraction
 
   @doc """
   Generate an infraction.
@@ -23,12 +21,5 @@ defmodule Radar.InfractionsFixtures do
       |> Infractions.create_speed_ticket()
 
     infraction
-  end
-
-  @doc """
-  Delete all infractions.
-  """
-  def delete_all_infractions do
-    Repo.delete_all(Infraction)
   end
 end

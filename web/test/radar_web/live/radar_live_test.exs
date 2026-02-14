@@ -112,14 +112,14 @@ defmodule RadarWeb.RadarLiveTest do
       assert html =~ "CASE TYPE"
       # Check for lowercase since template uses lowercase with uppercase CSS
       assert html =~ "speed ticket"
-      # QR code SVG is rendered
-      assert html =~ "<svg"
+      # QR code is rendered as base64 data URI
+      assert html =~ "data:image/svg+xml;base64,"
 
       # Check photo is displayed
       assert html =~ "/images/seed_"
 
-      # Check case ID format
-      assert html =~ "#1"
+      # Check case ID is a UUID
+      assert html =~ ~r/#[0-9a-f]{8}-[0-9a-f]{4}-/
     end
   end
 

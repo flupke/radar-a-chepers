@@ -43,41 +43,4 @@ defmodule Radar.Infractions do
         error
     end
   end
-
-  @doc """
-  Creates an infraction with the given attributes.
-  """
-  def create_infraction(attrs) do
-    %Infraction{}
-    |> Infraction.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Updates an infraction.
-  """
-  def update_infraction(%Infraction{} = infraction, attrs) do
-    infraction
-    |> Infraction.changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Deletes an infraction.
-  """
-  def delete_infraction(%Infraction{} = infraction) do
-    Repo.delete(infraction)
-  end
-
-  @doc """
-  Returns the count of infractions created today.
-  """
-  def count_infractions_today() do
-    today = Date.utc_today()
-    start_of_day = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
-
-    Infraction
-    |> where([i], i.inserted_at >= ^start_of_day)
-    |> Repo.aggregate(:count, :id)
-  end
 end

@@ -1,4 +1,5 @@
 defmodule Radar.Infraction do
+  @moduledoc false
   use Ecto.Schema
   import Ecto.Changeset
 
@@ -14,32 +15,6 @@ defmodule Radar.Infraction do
     belongs_to :photo, Radar.Photo
 
     timestamps()
-  end
-
-  @doc false
-  def changeset(infraction, attrs) do
-    infraction
-    |> cast(attrs, [
-      :type,
-      :datetime_taken,
-      :recorded_speed,
-      :authorized_speed,
-      :location,
-      :photo_id
-    ])
-    |> validate_required([
-      :type,
-      :datetime_taken,
-      :recorded_speed,
-      :authorized_speed,
-      :location,
-      :photo_id
-    ])
-    |> validate_inclusion(:type, ["speed_ticket"])
-    |> validate_number(:recorded_speed, greater_than: 0)
-    |> validate_number(:authorized_speed, greater_than: 0)
-    |> validate_length(:location, max: 255)
-    |> foreign_key_constraint(:photo_id)
   end
 
   @doc """

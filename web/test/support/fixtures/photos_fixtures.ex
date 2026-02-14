@@ -5,8 +5,6 @@ defmodule Radar.PhotosFixtures do
   """
 
   alias Radar.Photos
-  alias Radar.Photo
-  alias Radar.Repo
 
   @doc """
   Generate a photo record with Tigris mock expectations.
@@ -27,30 +25,5 @@ defmodule Radar.PhotosFixtures do
       {:ok, photo} -> photo
       {:error, reason} -> raise "Failed to create photo fixture: #{inspect(reason)}"
     end
-  end
-
-  @doc """
-  Create a photo record directly in the database without Tigris operations.
-  This is useful for tests that don't need the full upload flow.
-  """
-  def photo_fixture_direct(attrs \\ %{}) do
-    attrs =
-      attrs
-      |> Enum.into(%{
-        filename: "test_photo_#{System.unique_integer([:positive])}.jpg",
-        tigris_key: "radar/photos/test_#{System.unique_integer([:positive])}.jpg",
-        content_type: "image/jpeg",
-        file_size: 1000
-      })
-
-    {:ok, photo} = Repo.insert(%Photo{} |> Photo.changeset(attrs))
-    photo
-  end
-
-  @doc """
-  Delete all photos from the test database.
-  """
-  def delete_all_photos do
-    Repo.delete_all(Photo)
   end
 end

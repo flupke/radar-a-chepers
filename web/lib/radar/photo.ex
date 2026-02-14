@@ -1,4 +1,5 @@
 defmodule Radar.Photo do
+  @moduledoc false
   use Ecto.Schema
   import Ecto.Changeset
 
@@ -12,14 +13,6 @@ defmodule Radar.Photo do
     has_many :infractions, Radar.Infraction
 
     timestamps()
-  end
-
-  @doc false
-  def changeset(photo, attrs) do
-    photo
-    |> cast(attrs, [:filename, :file_path, :tigris_key, :content_type, :file_size])
-    |> validate_required([:filename])
-    |> validate_length(:filename, max: 255)
   end
 
   @doc """

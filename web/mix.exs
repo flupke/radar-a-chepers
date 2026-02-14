@@ -10,8 +10,40 @@ defmodule Radar.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      compilers: [:phoenix_live_view] ++ Mix.compilers(),
-      listeners: [Phoenix.CodeReloader]
+      compilers: extra_compilers(Mix.env()) ++ [:phoenix_live_view] ++ Mix.compilers(),
+      listeners: [Phoenix.CodeReloader],
+      dialyzer: [plt_add_apps: [:mix]],
+      unused: [
+        ignore: [
+          # All generated __dunder__ functions (Ecto, Phoenix, LiveView, etc.)
+          {:_, ~r/^__.*__\??$/},
+          # OTP callbacks (invoked by supervisors, not direct calls)
+          {:_, :child_spec, 1},
+          {:_, :start_link, 1},
+          # Ecto repo (all generated)
+          Radar.Repo,
+          # Phoenix framework modules (router, endpoint, components, layouts, telemetry, errors)
+          RadarWeb,
+          RadarWeb.Router,
+          RadarWeb.Endpoint,
+          RadarWeb.Telemetry,
+          RadarWeb.CoreComponents,
+          RadarWeb.Layouts,
+          RadarWeb.ErrorJSON,
+          # Controller actions (dispatched by router)
+          {~r/Controller$/, :_, 2},
+          # HEEx template render callbacks
+          {~r/HTML$/, :_, :_},
+          # Generated modules
+          Radar.Release,
+          Radar.Mailer,
+          # S3 behaviour callbacks
+          Radar.S3,
+          # Context functions called from controllers (invisible to tracer)
+          {Radar.Photos, :create_photo, 1},
+          {Radar.Photos, :get_photo_url, 2}
+        ]
+      ]
     ]
   end
 
@@ -24,6 +56,9 @@ defmodule Radar.MixProject do
       extra_applications: [:logger, :runtime_tools]
     ]
   end
+
+  defp extra_compilers(:dev), do: [:unused]
+  defp extra_compilers(_), do: []
 
   # Specifies which paths to compile per environment.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
@@ -66,7 +101,12 @@ defmodule Radar.MixProject do
       {:sweet_xml, "~> 0.6"},
       {:mox, "~> 1.0", only: :test},
       {:tidewave, "~> 0.5", only: :dev},
-      {:igniter, "~> 0.7"}
+      {:igniter, "~> 0.7"},
+      {:ex_check, "~> 0.16", only: :dev, runtime: false},
+      {:mix_unused, "~> 0.4", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
     ]
   end
 

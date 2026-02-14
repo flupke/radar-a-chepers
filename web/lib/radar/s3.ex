@@ -1,4 +1,5 @@
 defmodule Radar.S3 do
+  @moduledoc false
   @callback put_object(binary(), binary(), keyword()) :: {:ok, map()} | {:error, term()}
   @callback delete_object(binary()) :: {:ok, map()} | {:error, term()}
   @callback presigned_url(binary(), keyword()) :: {:ok, binary()} | {:error, binary()}

@@ -2,7 +2,6 @@ defmodule RadarWeb.Api.PhotoControllerTest do
   use RadarWeb.ConnCase
   use ExUnit.Case
 
-  alias Radar.Photos
   alias Radar.Infractions
   alias Radar.Repo
 
@@ -77,7 +76,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert %{"id" => photo_id, "infraction_id" => infraction_id, "filename" => "test_photo.jpg"} =
                json_response(conn, 201)
 
-      assert photo = Photos.get_photo!(photo_id)
+      assert photo = Repo.get!(Radar.Photo, photo_id)
       assert infraction = Infractions.get_infraction!(infraction_id)
 
       assert photo.id == infraction.photo_id
@@ -106,7 +105,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
 
       assert json_response(conn, 422)["error"] =~ "Failed to create infraction"
       # Photo should be rolled back
-      assert Photos.list_recent_photos() == []
+      assert Repo.all(Radar.Photo) == []
       assert Infractions.list_recent_infractions() == []
     end
 
