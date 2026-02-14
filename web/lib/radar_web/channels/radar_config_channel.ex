@@ -7,9 +7,13 @@ defmodule RadarWeb.RadarConfigChannel do
   @impl true
   def join("radar:config", _payload, socket) do
     Phoenix.PubSub.subscribe(Radar.PubSub, "radar_config")
-    config = RadarConfigs.get_config!()
-    send(self(), {:config_updated, config})
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_in("get_config", _payload, socket) do
+    config = RadarConfigs.get_config!()
+    {:reply, {:ok, RadarConfigs.config_payload(config)}, socket}
   end
 
   @impl true

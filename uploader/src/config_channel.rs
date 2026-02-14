@@ -45,6 +45,16 @@ async fn connect_and_run(
         .map_err(|e| eyre::eyre!("join error: {e}"))?;
     log::info!("Joined radar:config channel");
 
+    // Request initial config
+    let reply = channel
+        .send("get_config", serde_json::json!({}))
+        .await
+        .map_err(|e| eyre::eyre!("get_config error: {e}"))?;
+    if let Some(config) = parse_config_payload(&reply) {
+        let _ = config_tx.send(config);
+        log::info!("Received initial config");
+    }
+
     // Register handler for config_updated events
     let tx = config_tx.clone();
     channel
