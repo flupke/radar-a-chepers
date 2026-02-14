@@ -80,4 +80,23 @@ defmodule RadarWeb.RadarLive do
       socket
     end
   end
+
+  def qr_code_svg(infraction_id) do
+    url = RadarWeb.Endpoint.url() <> "/infractions/#{infraction_id}"
+
+    case url |> QRCode.create() |> QRCode.render(:svg) do
+      {:ok, svg} ->
+        svg =
+          Regex.replace(
+            ~r/(<svg)\s+width="(\d+)"\s+height="(\d+)"/,
+            svg,
+            ~S(\1 viewBox="0 0 \2 \3")
+          )
+
+        {:safe, svg}
+
+      _ ->
+        ""
+    end
+  end
 end

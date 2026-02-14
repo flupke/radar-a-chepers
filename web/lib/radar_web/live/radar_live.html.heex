@@ -67,12 +67,12 @@
                 <div class="text-lg font-bold text-white">#{@current_infraction.id}</div>
               </div>
               
-<!-- Right: QR Code placeholder -->
+<!-- Right: QR Code -->
               <div class="flex flex-col items-end">
                 <div class="text-sm text-gray-300 uppercase tracking-wide mb-2">CASE DETAILS</div>
-                <div class="w-32 h-32 border-2 border-white bg-gray-600 flex items-center justify-center">
-                  <span class="text-white text-xs">QR CODE</span>
-                </div>
+                <.link navigate={~p"/infractions/#{@current_infraction.id}"} class="block w-32 h-32 [&>svg]:w-full [&>svg]:h-full pointer-events-auto">
+                  {qr_code_svg(@current_infraction.id)}
+                </.link>
               </div>
             </div>
           </div>
