@@ -20,7 +20,7 @@ if System.get_env("PHX_SERVER") do
   config :radar, RadarWeb.Endpoint, server: true
 end
 
-if config_env() == :dev do
+if config_env() == :dev and Enum.member?(System.argv(), "phx.server") do
   fly_app = System.get_env("FLY_APP") || "rshep"
   fly_url = System.get_env("FLY_APP_URL") || "https://#{fly_app}.fly.dev/"
 
