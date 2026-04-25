@@ -37,7 +37,10 @@ async fn connect_and_run(
 
     log::info!("Connecting to config channel at {ws_url}...");
     let mut client = Client::new(config).map_err(|e| eyre::eyre!("client error: {e}"))?;
-    client.connect().await.map_err(|e| eyre::eyre!("connect error: {e}"))?;
+    client
+        .connect()
+        .await
+        .map_err(|e| eyre::eyre!("connect error: {e}"))?;
 
     let channel = client
         .join("radar:config", Some(Duration::from_secs(10)))
@@ -58,11 +61,14 @@ async fn connect_and_run(
     // Register handler for config_updated events
     let tx = config_tx.clone();
     channel
-        .on("config_updated", move |_channel: Arc<_>, payload: &Payload| {
-            if let Some(config) = parse_config_payload(payload) {
-                let _ = tx.send(config);
-            }
-        })
+        .on(
+            "config_updated",
+            move |_channel: Arc<_>, payload: &Payload| {
+                if let Some(config) = parse_config_payload(payload) {
+                    let _ = tx.send(config);
+                }
+            },
+        )
         .await
         .map_err(|e| eyre::eyre!("on error: {e}"))?;
 
@@ -107,11 +113,13 @@ fn parse_config_payload(payload: &Payload) -> Option<RadarConfig> {
     let min_dist = value.get("min_dist")?.as_f64()?;
     let max_dist = value.get("max_dist")?.as_f64()?;
     let trigger_cooldown = value.get("trigger_cooldown")?.as_i64()?;
+    let aperture_angle = value.get("aperture_angle")?.as_i64()? as i16;
 
     Some(RadarConfig {
         authorized_speed,
         min_dist,
         max_dist,
         trigger_cooldown,
+        aperture_angle,
     })
 }

@@ -15,6 +15,7 @@ pub struct RadarConfig {
     pub min_dist: f64,
     pub max_dist: f64,
     pub trigger_cooldown: i64,
+    pub aperture_angle: i16,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,6 +76,7 @@ struct InfractionRecorderInner {
     min_dist: f64,
     max_dist: f64,
     trigger_cooldown_ms: i64,
+    aperture_angle: i16,
     last_infraction: Option<Infraction>,
     photos_dir: Utf8PathBuf,
     uploader_port: ActorPort<InfractionUploaderCommand>,
@@ -100,16 +102,18 @@ impl Actor for InfractionRecorderInner {
                 }
                 InfractionRecorderCommand::UpdateConfig(config) => {
                     log::info!(
-                        "Config updated: authorized_speed={}, min_dist={}, max_dist={}, trigger_cooldown={}ms",
+                        "Config updated: authorized_speed={}, min_dist={}, max_dist={}, trigger_cooldown={}ms, aperture_angle={}",
                         config.authorized_speed,
                         config.min_dist,
                         config.max_dist,
-                        config.trigger_cooldown
+                        config.trigger_cooldown,
+                        config.aperture_angle
                     );
                     self.authorized_speed = config.authorized_speed;
                     self.min_dist = config.min_dist;
                     self.max_dist = config.max_dist;
                     self.trigger_cooldown_ms = config.trigger_cooldown;
+                    self.aperture_angle = config.aperture_angle;
                 }
             }
         }
@@ -131,6 +135,7 @@ impl InfractionRecorderInner {
             min_dist: 0.0,
             max_dist: 10_000.0,
             trigger_cooldown_ms: 1000,
+            aperture_angle: 90,
             photos_dir,
             uploader_port,
             target_data_tx,
@@ -143,9 +148,7 @@ impl InfractionRecorderInner {
         if !message.starts_with(Self::TARGET_PREFIX) {
             return Ok(());
         }
-        let rest = message
-            .strip_prefix(Self::TARGET_PREFIX)
-            .unwrap();
+        let rest = message.strip_prefix(Self::TARGET_PREFIX).unwrap();
         let parts: Vec<&str> = rest.split_whitespace().collect();
         if parts.len() != 3 {
             return Ok(());
@@ -156,14 +159,25 @@ impl InfractionRecorderInner {
         let distance = ((x as f64).powi(2) + (y as f64).powi(2)).sqrt();
 
         let in_range = self.min_dist <= distance && distance <= self.max_dist;
+        let angle = (x as f64).atan2(y as f64).to_degrees().abs();
+        let in_aperture = angle <= self.aperture_angle as f64 / 2.0;
         let over_speed = speed > self.authorized_speed;
         let cooldown_elapsed = match &self.last_infraction {
-            Some(inf) => Utc::now().signed_duration_since(inf.datetime_taken) >= TimeDelta::milliseconds(self.trigger_cooldown_ms),
+            Some(inf) => {
+                Utc::now().signed_duration_since(inf.datetime_taken)
+                    >= TimeDelta::milliseconds(self.trigger_cooldown_ms)
+            }
             None => true,
         };
-        let triggered = in_range && over_speed && cooldown_elapsed;
+        let triggered = in_range && in_aperture && over_speed && cooldown_elapsed;
 
-        let target_data = TargetData { speed, x, y, distance, triggered };
+        let target_data = TargetData {
+            speed,
+            x,
+            y,
+            distance,
+            triggered,
+        };
         let _ = self.target_data_tx.send(target_data);
 
         if triggered {

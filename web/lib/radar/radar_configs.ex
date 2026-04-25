@@ -29,7 +29,8 @@ defmodule Radar.RadarConfigs do
       authorized_speed: config.authorized_speed,
       min_dist: config.min_dist,
       max_dist: config.max_dist,
-      trigger_cooldown: config.trigger_cooldown
+      trigger_cooldown: config.trigger_cooldown,
+      aperture_angle: config.aperture_angle
     }
   end
 end

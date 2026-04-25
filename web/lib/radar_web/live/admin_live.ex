@@ -19,12 +19,7 @@ defmodule RadarWeb.AdminLive do
       |> assign(:config, config)
       |> assign(:form, config_to_form(config))
       |> assign(:last_ui_update, System.monotonic_time(:millisecond) - @throttle_ms)
-      |> push_event("radar_config", %{
-        min_dist: config.min_dist,
-        max_dist: config.max_dist,
-        authorized_speed: config.authorized_speed,
-        trigger_cooldown: config.trigger_cooldown
-      })
+      |> push_config_event(config)
 
     {:ok, socket}
   end
@@ -46,33 +41,46 @@ defmodule RadarWeb.AdminLive do
         <div class="card-body">
           <h2 class="card-title">Trigger Parameters</h2>
 
-          <.form for={@form} phx-change="update_config" class="space-y-4">
-            <.input
+          <.form for={@form} phx-change="update_config" class="space-y-5">
+            <.slider_input
               field={@form[:authorized_speed]}
-              type="number"
               label="Authorized Speed (km/h)"
               min="1"
+              max="200"
+              step="1"
+              unit="km/h"
             />
-            <.input
+            <.slider_input
               field={@form[:min_dist]}
-              type="number"
               label="Min Distance (meters)"
               min="0"
+              max={@form[:max_dist].value}
               step="0.1"
+              unit="m"
             />
-            <.input
+            <.slider_input
               field={@form[:max_dist]}
-              type="number"
               label="Max Distance (meters)"
-              min="0"
+              min={@form[:min_dist].value}
+              max="15"
               step="0.1"
+              unit="m"
             />
-            <.input
+            <.slider_input
               field={@form[:trigger_cooldown]}
-              type="number"
               label="Trigger Cooldown (seconds)"
               min="0"
+              max="30"
               step="0.1"
+              unit="s"
+            />
+            <.slider_input
+              field={@form[:aperture_angle]}
+              label="Aperture Angle"
+              min="1"
+              max="180"
+              step="1"
+              unit="degrees"
             />
           </.form>
         </div>
@@ -123,9 +131,11 @@ defmodule RadarWeb.AdminLive do
                   if (cfg) {
                     const cx = w / 2;
                     const cy = h;
-                    ctx.setLineDash([4, 4]);
-                    ctx.lineWidth = 1;
-                    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+                    const halfAngle = (cfg.aperture_angle || 180) * Math.PI / 360;
+                    const boundaryLength = VIEW_RANGE;
+                    ctx.setLineDash([6, 6]);
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = "rgba(251, 191, 36, 0.65)";
 
                     ctx.beginPath();
                     ctx.arc(cx, cy, cfg.min_dist * scale, Math.PI, 0);
@@ -135,6 +145,16 @@ defmodule RadarWeb.AdminLive do
                     ctx.arc(cx, cy, cfg.max_dist * scale, Math.PI, 0);
                     ctx.stroke();
 
+                    for (const angle of [-halfAngle, halfAngle]) {
+                      ctx.beginPath();
+                      ctx.moveTo(cx, cy);
+                      ctx.lineTo(
+                        cx + Math.sin(angle) * boundaryLength * scale,
+                        cy - Math.cos(angle) * boundaryLength * scale
+                      );
+                      ctx.stroke();
+                    }
+
                     ctx.setLineDash([]);
                   }
 
@@ -143,13 +163,19 @@ defmodule RadarWeb.AdminLive do
                     const opacity = 1 - age / FADE_MS;
                     const px = w / 2 + dot.x * scale;
                     const py = h - dot.y * scale;
+                    const angle = Math.abs(Math.atan2(dot.x, dot.y) * 180 / Math.PI);
+                    const inAperture = !cfg || angle <= (cfg.aperture_angle || 180) / 2;
+                    const inRange = !cfg || (cfg.min_dist <= dot.distance && dot.distance <= cfg.max_dist);
+                    const active = inAperture && inRange;
 
                     const ratio = cfg ? Math.min(dot.speed / (cfg.authorized_speed * 2), 1) : 0.5;
                     const hue = 120 * (1 - ratio);
 
                     ctx.beginPath();
                     ctx.arc(px, py, 5, 0, Math.PI * 2);
-                    ctx.fillStyle = `hsla(${hue}, 90%, 55%, ${opacity})`;
+                    ctx.fillStyle = active
+                      ? `hsla(${hue}, 90%, 55%, ${opacity})`
+                      : `hsla(215, 8%, 65%, ${opacity * 0.35})`;
                     ctx.fill();
 
                     if (dot.triggered) {
@@ -190,12 +216,7 @@ defmodule RadarWeb.AdminLive do
      socket
      |> assign(:config, config)
      |> assign(:form, config_to_form(config))
-     |> push_event("radar_config", %{
-       min_dist: config.min_dist,
-       max_dist: config.max_dist,
-       authorized_speed: config.authorized_speed,
-       trigger_cooldown: config.trigger_cooldown
-     })}
+     |> push_config_event(config)}
   end
 
   def handle_info({:target_data, data}, socket) do
@@ -223,7 +244,8 @@ defmodule RadarWeb.AdminLive do
         "authorized_speed" => config.authorized_speed,
         "min_dist" => config.min_dist / 1000,
         "max_dist" => config.max_dist / 1000,
-        "trigger_cooldown" => config.trigger_cooldown / 1000
+        "trigger_cooldown" => config.trigger_cooldown / 1000,
+        "aperture_angle" => config.aperture_angle
       },
       as: :config
     )
@@ -238,8 +260,43 @@ defmodule RadarWeb.AdminLive do
       "authorized_speed" => params["authorized_speed"],
       "min_dist" => round(min_dist_m * 1000),
       "max_dist" => round(max_dist_m * 1000),
-      "trigger_cooldown" => round(cooldown_s * 1000)
+      "trigger_cooldown" => round(cooldown_s * 1000),
+      "aperture_angle" => params["aperture_angle"]
     }
+  end
+
+  attr :field, Phoenix.HTML.FormField, required: true
+  attr :label, :string, required: true
+  attr :unit, :string, required: true
+  attr :min, :string, required: true
+  attr :max, :string, required: true
+  attr :step, :string, required: true
+
+  defp slider_input(assigns) do
+    ~H"""
+    <div class="fieldset mb-2">
+      <label for={@field.id} class="label mb-1">
+        <span>{@label}</span>
+        <output class="font-mono text-sm">
+          {@field.value} {@unit}
+        </output>
+      </label>
+      <input
+        type="range"
+        id={@field.id}
+        name={@field.name}
+        value={@field.value}
+        min={@min}
+        max={@max}
+        step={@step}
+        class="range range-primary w-full"
+      />
+    </div>
+    """
+  end
+
+  defp push_config_event(socket, config) do
+    push_event(socket, "radar_config", RadarConfigs.config_payload(config))
   end
 
   defp parse_float(val) when is_binary(val) do
