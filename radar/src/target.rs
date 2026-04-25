@@ -3,7 +3,7 @@ const FOOTER: [u8; 2] = [0x55, 0xCC];
 const MAX_TARGETS: usize = 4;
 const TARGET_LENGTH: usize = 8;
 
-enum TargetParseError {
+pub enum TargetParseError {
     InvalidDataLength,
     Empty,
 }

@@ -13,10 +13,10 @@ use bt_hci::controller::ExternalController;
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::{
-    Async,
     clock::CpuClock,
     timer::{systimer::SystemTimer, timg::TimerGroup},
     uart::{Config, DataBits, Parity, StopBits, Uart, UartRx, UartTx},
+    Async,
 };
 use esp_println as _;
 use esp_wifi::ble::controller::BleConnector;
