@@ -109,6 +109,23 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert Infractions.list_recent_infractions() == []
     end
 
+    test "returns error without creating a photo if infraction JSON is invalid", %{
+      conn: conn,
+      upload: upload
+    } do
+      conn =
+        conn
+        |> put_req_header("x-api-key", @valid_api_key)
+        |> post("/api/photos", %{
+          "photo" => upload,
+          "infraction" => "{not-json"
+        })
+
+      assert json_response(conn, 422)["error"] == "Invalid infraction JSON"
+      assert Repo.all(Radar.Photo) == []
+      assert Infractions.list_recent_infractions() == []
+    end
+
     test "returns error if missing photo or infraction data in request", %{upload: upload} do
       conn =
         build_conn()

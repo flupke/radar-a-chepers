@@ -32,8 +32,9 @@ defmodule RadarWeb.Api.PhotoController do
   end
 
   defp handle_photo_upload(conn, %{"photo" => photo_upload, "infraction" => infraction_data}) do
-    with {:ok, file_data} <- read_upload_file(photo_upload),
-         {:ok, photo} <- create_photo_with_infraction(photo_upload, file_data, infraction_data) do
+    with {:ok, decoded_infraction} <- decode_infraction_data(infraction_data),
+         {:ok, file_data} <- read_upload_file(photo_upload),
+         {:ok, photo} <- create_photo_with_infraction(photo_upload, file_data, decoded_infraction) do
       conn
       |> put_status(:created)
       |> json(%{
@@ -68,7 +69,18 @@ defmodule RadarWeb.Api.PhotoController do
     end
   end
 
-  defp create_photo_with_infraction(upload, file_data, infraction_data) do
+  defp decode_infraction_data(data) when is_binary(data) do
+    case Jason.decode(data) do
+      {:ok, decoded} when is_map(decoded) -> {:ok, decoded}
+      {:ok, _decoded} -> {:error, "Invalid infraction data"}
+      {:error, _reason} -> {:error, "Invalid infraction JSON"}
+    end
+  end
+
+  defp decode_infraction_data(data) when is_map(data), do: {:ok, data}
+  defp decode_infraction_data(_data), do: {:error, "Invalid infraction data"}
+
+  defp create_photo_with_infraction(upload, file_data, decoded_infraction) do
     photo_attrs = %{
       "filename" => upload.filename,
       "content_type" => upload.content_type,
@@ -77,13 +89,6 @@ defmodule RadarWeb.Api.PhotoController do
 
     case Photos.create_photo(photo_attrs, file_data) do
       {:ok, photo} ->
-        # First decode the JSON string if it's a string
-        decoded_infraction =
-          case infraction_data do
-            data when is_binary(data) -> Jason.decode!(data)
-            data when is_map(data) -> data
-          end
-
         infraction_attrs =
           Map.merge(decoded_infraction, %{
             "photo_id" => photo.id,
