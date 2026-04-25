@@ -54,12 +54,14 @@ impl Actor for RadarReader {
         let mut buffer = [0; 4096];
         log::info!("Listening for logs on {}...", self.serial_port);
 
-        let mut offset = 0;
         loop {
             match port.read(&mut buffer) {
                 Ok(num_bytes) => {
-                    offset += num_bytes;
-                    stream_decoder.received(&buffer[..offset]);
+                    if num_bytes == 0 {
+                        continue;
+                    }
+
+                    stream_decoder.received(&buffer[..num_bytes]);
                     loop {
                         match stream_decoder.decode() {
                             Ok(frame) => {
@@ -73,7 +75,6 @@ impl Actor for RadarReader {
                                 if let Err(err) = port.clear(tokio_serial::ClearBuffer::Input) {
                                     log::error!("Failed to clear serial input buffer: {err}");
                                 }
-                                offset = 0;
                             }
                             Err(DecodeError::UnexpectedEof) => {
                                 // Need more data
@@ -83,7 +84,6 @@ impl Actor for RadarReader {
                                 // if recovery is impossible, abort
                                 false => {
                                     log::error!("Malformed frame skipped");
-                                    offset = 0;
                                     break;
                                 }
                                 // if recovery is possible, skip the current frame and continue with new data
