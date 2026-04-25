@@ -13,16 +13,16 @@ use bt_hci::controller::ExternalController;
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::{
+    Async,
     clock::CpuClock,
     timer::{systimer::SystemTimer, timg::TimerGroup},
     uart::{Config, DataBits, Parity, StopBits, Uart, UartRx, UartTx},
-    Async,
 };
 use esp_println as _;
 use esp_wifi::ble::controller::BleConnector;
 use radar_a_chepers::{
     command::{FRAME_FOOTER, FRAME_HEADER, SET_SINGLE_TARGET},
-    target::TargetsList,
+    target::{TargetsList, TargetsListParseError},
 };
 
 const READ_BUF_SIZE: usize = 64;
@@ -87,6 +87,10 @@ async fn reader(mut rx: UartRx<'static, Async>) {
         let result = embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..]).await;
         match result {
             Ok(len) => {
+                if len == 0 {
+                    continue;
+                }
+
                 offset += len;
                 defmt::debug!("RX: {:#X}", &rbuf[..offset]);
                 match TargetsList::try_from(&rbuf[..offset]) {
@@ -94,14 +98,24 @@ async fn reader(mut rx: UartRx<'static, Async>) {
                         defmt::debug!("Targets: {:#?}", targets);
                         for target in targets.targets().iter().flatten() {
                             let speed = -target.speed;
-                            defmt::info!("{}{}{} {} {}", EVENTS_PREFIX, TARGET_PREFIX, speed, target.x, target.y);
+                            defmt::info!(
+                                "{}{}{} {} {}",
+                                EVENTS_PREFIX,
+                                TARGET_PREFIX,
+                                speed,
+                                target.x,
+                                target.y
+                            );
                         }
+                        offset = 0;
                     }
+                    Err(TargetsListParseError::DataTooShort(_)) => {}
+                    Err(TargetsListParseError::InvalidFooter(_)) if offset < rbuf.len() => {}
                     Err(err) => {
                         defmt::error!("Error parsing targets: {:?}", err);
+                        offset = 0;
                     }
                 }
-                offset = 0;
             }
             Err(err) => defmt::error!("RX Error: {:?}", err),
         }
