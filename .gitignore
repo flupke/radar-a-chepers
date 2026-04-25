@@ -1,2 +1,5 @@
 .claude
 .codex
+.nix
+erl_crash.dump
+result
