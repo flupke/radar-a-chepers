@@ -20,6 +20,78 @@ if System.get_env("PHX_SERVER") do
   config :radar, RadarWeb.Endpoint, server: true
 end
 
+if config_env() == :dev do
+  fly_app = System.get_env("FLY_APP") || "rshep"
+  fly_url = System.get_env("FLY_APP_URL") || "https://#{fly_app}.fly.dev/"
+
+  fetch_fly_secret = fn name ->
+    case System.cmd("fly", ["ssh", "console", "--app", fly_app, "-C", "printenv #{name}", "-q"],
+           stderr_to_stdout: true
+         ) do
+      {value, 0} ->
+        case String.trim(value) do
+          "" -> nil
+          value -> value
+        end
+
+      {reason, _status} ->
+        IO.puts(
+          :stderr,
+          "Could not fetch #{name} from Fly app #{fly_app}: #{String.trim(reason)}"
+        )
+
+        nil
+    end
+  end
+
+  wake_fly_app = fn ->
+    IO.puts(:stderr, "Waking Fly app #{fly_app} at #{fly_url}...")
+
+    Application.ensure_all_started(:ssl)
+    Application.ensure_all_started(:inets)
+
+    case :httpc.request(
+           :get,
+           {String.to_charlist(fly_url), []},
+           [timeout: 30_000],
+           body_format: :binary
+         ) do
+      {:ok, {{_, status, _}, _headers, _body}} when status in 200..599 ->
+        :ok
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Could not wake Fly app #{fly_app}: #{inspect(reason)}")
+        :error
+    end
+  end
+
+  secret_names = ~w(GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET)
+  missing_secret_names = Enum.filter(secret_names, &(System.get_env(&1) |> is_nil()))
+
+  fetched_any? =
+    Enum.reduce(missing_secret_names, false, fn name, fetched_any? ->
+      case fetch_fly_secret.(name) do
+        nil ->
+          fetched_any?
+
+        value ->
+          System.put_env(name, value)
+          true
+      end
+    end)
+
+  if missing_secret_names != [] and not fetched_any? do
+    wake_fly_app.()
+
+    for name <- missing_secret_names,
+        is_nil(System.get_env(name)),
+        value = fetch_fly_secret.(name),
+        not is_nil(value) do
+      System.put_env(name, value)
+    end
+  end
+end
+
 # Google OAuth for admin (all environments, runtime)
 if client_id = System.get_env("GOOGLE_CLIENT_ID") do
   config :ueberauth, Ueberauth.Strategy.Google.OAuth,
@@ -28,8 +100,7 @@ if client_id = System.get_env("GOOGLE_CLIENT_ID") do
 end
 
 if admin_emails = System.get_env("ADMIN_EMAILS") do
-  config :radar, :admin_emails,
-    admin_emails |> String.split(",") |> Enum.map(&String.trim/1)
+  config :radar, :admin_emails, admin_emails |> String.split(",") |> Enum.map(&String.trim/1)
 end
 
 if config_env() == :prod do
