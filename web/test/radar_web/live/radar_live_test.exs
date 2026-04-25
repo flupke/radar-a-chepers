@@ -70,15 +70,15 @@ defmodule RadarWeb.RadarLiveTest do
       {:ok, view, html} = live(conn, "/")
 
       # Should show the newest infraction immediately (no delay)
-      assert html =~ "90 MPH"
+      assert html =~ "90 km/h"
       assert html =~ "Highway 3"
       # Photo URL from mock S3 client (stored in ETS, served via dev route)
       assert html =~ "/dev/photos/"
       refute html =~ "RADAR SYSTEM ACTIVE"
       # oldest should not be visible
-      refute html =~ "70 MPH"
+      refute html =~ "70 km/h"
       # middle should not be visible
-      refute html =~ "80 MPH"
+      refute html =~ "80 km/h"
 
       # Verify in rendered content
       refute render(view) =~ "RADAR SYSTEM ACTIVE"
@@ -102,11 +102,11 @@ defmodule RadarWeb.RadarLiveTest do
       assert html =~ "SPEED VIOLATION"
       assert html =~ "01/15/2024 02:30:00 PM"
       assert html =~ "RECORDED SPEED"
-      assert html =~ "85 MPH"
+      assert html =~ "85 km/h"
       assert html =~ "SPEED LIMIT"
-      assert html =~ "60 MPH"
+      assert html =~ "60 km/h"
       assert html =~ "VIOLATION"
-      assert html =~ "+25 MPH"
+      assert html =~ "+25 km/h"
       assert html =~ "LOCATION"
       assert html =~ "Interstate 5 Mile 100"
       assert html =~ "CASE TYPE"
@@ -158,28 +158,28 @@ defmodule RadarWeb.RadarLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       # Should start with newest infraction (Location 3)
-      assert render(view) =~ "90 MPH"
+      assert render(view) =~ "90 km/h"
       assert render(view) =~ "Location 3"
 
       # Simulate timer advance message
       send(view.pid, :advance_infraction)
 
       # Should cycle to next infraction (Location 2)
-      assert render(view) =~ "80 MPH"
+      assert render(view) =~ "80 km/h"
       assert render(view) =~ "Location 2"
 
       # Advance again
       send(view.pid, :advance_infraction)
 
       # Should cycle to next infraction (Location 1)
-      assert render(view) =~ "70 MPH"
+      assert render(view) =~ "70 km/h"
       assert render(view) =~ "Location 1"
 
       # Advance again - should wrap back to newest
       send(view.pid, :advance_infraction)
 
       # Should wrap back to newest infraction (Location 3)
-      assert render(view) =~ "90 MPH"
+      assert render(view) =~ "90 km/h"
       assert render(view) =~ "Location 3"
     end
 
@@ -202,18 +202,18 @@ defmodule RadarWeb.RadarLiveTest do
 
       {:ok, view, _html} = live(conn, "/")
 
-      # Should start with newest (Location 5, 100 MPH)
-      assert render(view) =~ "100 MPH"
+      # Should start with newest (Location 5, 100 km/h)
+      assert render(view) =~ "100 km/h"
       assert render(view) =~ "Location 5"
 
       # Cycle through all infractions and verify order
       expected_sequence = [
-        {"90 MPH", "Location 4"},
-        {"80 MPH", "Location 3"},
-        {"70 MPH", "Location 2"},
-        {"60 MPH", "Location 1"},
+        {"90 km/h", "Location 4"},
+        {"80 km/h", "Location 3"},
+        {"70 km/h", "Location 2"},
+        {"60 km/h", "Location 1"},
         # Should wrap back to newest
-        {"100 MPH", "Location 5"}
+        {"100 km/h", "Location 5"}
       ]
 
       Enum.with_index(expected_sequence, 1)
@@ -263,7 +263,7 @@ defmodule RadarWeb.RadarLiveTest do
         })
 
       # The infraction should appear immediately due to PubSub
-      assert render(view) =~ "95 MPH"
+      assert render(view) =~ "95 km/h"
       assert render(view) =~ "Highway 101 Mile 50"
       refute render(view) =~ "RADAR SYSTEM ACTIVE"
     end
@@ -294,12 +294,12 @@ defmodule RadarWeb.RadarLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       # Should start with newest (Location 2)
-      assert render(view) =~ "80 MPH"
+      assert render(view) =~ "80 km/h"
       assert render(view) =~ "Old Location 2"
 
       # Advance to show first infraction
       send(view.pid, :advance_infraction)
-      assert render(view) =~ "70 MPH"
+      assert render(view) =~ "70 km/h"
       assert render(view) =~ "Old Location 1"
 
       # Now add a new infraction via PubSub
@@ -315,7 +315,7 @@ defmodule RadarWeb.RadarLiveTest do
         })
 
       # Should immediately show the newest infraction and reset index
-      assert render(view) =~ "95 MPH"
+      assert render(view) =~ "95 km/h"
       assert render(view) =~ "Brand New Location"
     end
 
@@ -332,7 +332,7 @@ defmodule RadarWeb.RadarLiveTest do
         })
 
       {:ok, view, html} = live(conn, "/")
-      assert html =~ "75 MPH"
+      assert html =~ "75 km/h"
       assert html =~ "First Location"
 
       # Add multiple newer infractions rapidly via PubSub
@@ -349,7 +349,7 @@ defmodule RadarWeb.RadarLiveTest do
         })
 
       # Should show the second infraction
-      assert render(view) =~ "85 MPH"
+      assert render(view) =~ "85 km/h"
       assert render(view) =~ "Second Location"
 
       {:ok, _final_infraction} =
@@ -362,7 +362,7 @@ defmodule RadarWeb.RadarLiveTest do
         })
 
       # Should immediately show the newest (final) infraction
-      assert render(view) =~ "105 MPH"
+      assert render(view) =~ "105 km/h"
       assert render(view) =~ "Final Location"
     end
   end
@@ -390,7 +390,7 @@ defmodule RadarWeb.RadarLiveTest do
       # Should no longer be empty
       refute render(view) =~ "RADAR SYSTEM ACTIVE"
       refute render(view) =~ "Waiting for infractions..."
-      assert render(view) =~ "85 MPH"
+      assert render(view) =~ "85 km/h"
     end
 
     test "maintains correct cycling behavior through multiple infractions", %{conn: conn} do
@@ -410,17 +410,17 @@ defmodule RadarWeb.RadarLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       # Should start with newest (Location 3)
-      assert render(view) =~ "80 MPH"
+      assert render(view) =~ "80 km/h"
       assert render(view) =~ "Location 3"
 
       # Test full cycle with proper wrapping
       indices_and_advances = [
-        {"70 MPH", "Location 2"},
-        {"60 MPH", "Location 1"},
-        {"80 MPH", "Location 3"},
-        {"70 MPH", "Location 2"},
-        {"60 MPH", "Location 1"},
-        {"80 MPH", "Location 3"}
+        {"70 km/h", "Location 2"},
+        {"60 km/h", "Location 1"},
+        {"80 km/h", "Location 3"},
+        {"70 km/h", "Location 2"},
+        {"60 km/h", "Location 1"},
+        {"80 km/h", "Location 3"}
       ]
 
       Enum.each(indices_and_advances, fn {expected_speed, expected_location} ->
@@ -451,7 +451,7 @@ defmodule RadarWeb.RadarLiveTest do
       # Advance to middle of cycling
       send(view.pid, :advance_infraction)
       send(view.pid, :advance_infraction)
-      assert render(view) =~ "60 MPH"
+      assert render(view) =~ "60 km/h"
       assert render(view) =~ "Initial Location 1"
 
       # Add new infraction
@@ -467,7 +467,7 @@ defmodule RadarWeb.RadarLiveTest do
         })
 
       # Should immediately show new infraction
-      assert render(view) =~ "100 MPH"
+      assert render(view) =~ "100 km/h"
       assert render(view) =~ "Latest Location"
     end
   end

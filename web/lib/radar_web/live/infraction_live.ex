@@ -60,17 +60,17 @@ defmodule RadarWeb.InfractionLive do
               <div class="stat">
                 <div class="stat-title">Recorded Speed</div>
                 <div class="stat-value text-error">{@infraction.recorded_speed}</div>
-                <div class="stat-desc">MPH</div>
+                <div class="stat-desc">km/h</div>
               </div>
               <div class="stat">
                 <div class="stat-title">Speed Limit</div>
                 <div class="stat-value">{@infraction.authorized_speed}</div>
-                <div class="stat-desc">MPH</div>
+                <div class="stat-desc">km/h</div>
               </div>
               <div class="stat">
                 <div class="stat-title">Violation</div>
                 <div class="stat-value text-error text-2xl">
-                  +{@infraction.recorded_speed - @infraction.authorized_speed} MPH
+                  +{@infraction.recorded_speed - @infraction.authorized_speed} km/h
                 </div>
                 <div class={"stat-desc font-semibold #{severity_color(violation_severity(@infraction.recorded_speed, @infraction.authorized_speed))}"}>
                   {violation_severity(@infraction.recorded_speed, @infraction.authorized_speed)}

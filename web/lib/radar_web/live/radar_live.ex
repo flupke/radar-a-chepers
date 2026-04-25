@@ -52,15 +52,15 @@ defmodule RadarWeb.RadarLive do
                 <div class="space-y-2">
                   <div class="text-sm opacity-60 uppercase tracking-wide">RECORDED SPEED</div>
                   <div class="text-4xl font-bold">
-                    {@current_infraction.recorded_speed} MPH
+                    {@current_infraction.recorded_speed} km/h
                   </div>
                   <div class="text-sm opacity-60 uppercase tracking-wide">SPEED LIMIT</div>
                   <div class="text-2xl font-bold">
-                    {@current_infraction.authorized_speed} MPH
+                    {@current_infraction.authorized_speed} km/h
                   </div>
                   <div class="text-sm opacity-60 uppercase tracking-wide">VIOLATION</div>
                   <div class="text-xl font-bold text-error">
-                    +{@current_infraction.recorded_speed - @current_infraction.authorized_speed} MPH
+                    +{@current_infraction.recorded_speed - @current_infraction.authorized_speed} km/h
                   </div>
                 </div>
 

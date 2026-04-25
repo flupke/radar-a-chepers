@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Radar.FlySeed do
           location: location
         })
 
-      Mix.shell().info("==> Uploading seed_#{i}.jpg (#{speed} MPH at #{location})...")
+      Mix.shell().info("==> Uploading seed_#{i}.jpg (#{speed} km/h at #{location})...")
 
       case Req.post("#{base_url}/api/photos",
              headers: [{"x-api-key", api_key}],

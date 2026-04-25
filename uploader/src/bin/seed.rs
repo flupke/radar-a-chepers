@@ -52,7 +52,7 @@ async fn main() {
             .save_infraction_json(&infractions_dir)
             .unwrap_or_else(|e| panic!("Failed to write JSON: {e}"));
 
-        println!("    seed_{i}.jpg ({speed} MPH at {location})");
+        println!("    seed_{i}.jpg ({speed} km/h at {location})");
     }
 
     println!("==> Uploading via InfractionUploader...");
@@ -60,11 +60,8 @@ async fn main() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let uploader = InfractionUploader::new(
-                infractions_dir,
-                args.api_endpoint,
-                args.api_key,
-            );
+            let uploader =
+                InfractionUploader::new(infractions_dir, args.api_endpoint, args.api_key);
             uploader
                 .port
                 .send(InfractionUploaderCommand::NotifyInfraction)
