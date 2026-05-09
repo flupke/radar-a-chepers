@@ -5,12 +5,12 @@ RADAR_SOURCES := $(shell find radar -name '*.rs')
 
 run-uploader: $(RADAR_BINARY)
 	cd uploader && \
-		cargo run -- \
+		cargo run --bin uploader -- \
 		--serial-port /dev/ttyACM0 \
 		--api-key $(API_KEY) \
 		--api-endpoint $(API_ENDPOINT) \
 		--elf-path ../$(RADAR_BINARY) \
-		--photos-dir ../photos
+		--infractions-dir ../infractions
 
 integration-test:
 	bin/integration-test
