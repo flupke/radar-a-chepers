@@ -1,7 +1,7 @@
 use camino::Utf8PathBuf;
 use clap::Parser;
 use env_logger::Env;
-use eyre::{Result, eyre};
+use eyre::{Result, WrapErr, eyre};
 use tokio::sync::broadcast;
 
 use uploader::{
@@ -37,9 +37,17 @@ struct Args {
 
 impl Args {
     fn check(&self) -> Result<()> {
-        if !(self.infractions_dir.exists() && self.infractions_dir.is_dir()) {
+        if !self.infractions_dir.exists() {
+            std::fs::create_dir_all(&self.infractions_dir).wrap_err_with(|| {
+                format!(
+                    "Failed to create infractions directory: {}",
+                    self.infractions_dir
+                )
+            })?;
+        }
+        if !self.infractions_dir.is_dir() {
             return Err(eyre!(
-                "Infractions directory does not exist: {}",
+                "Infractions path is not a directory: {}",
                 self.infractions_dir
             ));
         }

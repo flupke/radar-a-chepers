@@ -91,7 +91,7 @@ impl InfractionUploaderInner {
             let body: serde_json::Value = resp.json().await?;
             log::info!("Uploaded infraction #{}", body["infraction_id"]);
             std::fs::remove_file(json_path)?;
-            std::fs::remove_file(photo_path)?;
+            log::info!("Kept uploaded photo at {}", photo_path.display());
         } else {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();

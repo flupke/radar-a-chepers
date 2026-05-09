@@ -1,6 +1,6 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, TimeDelta, Utc};
-use eyre::{Context, Result};
+use eyre::{Context, Result, eyre};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -254,12 +254,21 @@ impl InfractionRecorderInner {
         .run()?;
         if !output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(eyre::eyre!(
+            return Err(eyre!(
                 "gphoto2 command failed with status {}:\n{}",
                 output.status,
                 stdout
             ));
         }
+
+        if !photo_path.exists() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(eyre!(
+                "gphoto2 completed successfully but did not create {photo_path}:\n{}",
+                stdout
+            ));
+        }
+        log::info!("Saved photo to {photo_path}");
 
         Ok(())
     }
@@ -275,7 +284,7 @@ pub struct Infraction {
 
 impl Infraction {
     fn base_name(&self) -> String {
-        self.datetime_taken.to_rfc3339()
+        self.datetime_taken.format("%Y%m%dT%H%M%S%.fZ").to_string()
     }
 
     pub fn photo_path(&self, photos_dir: &Utf8Path) -> Utf8PathBuf {

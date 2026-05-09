@@ -1,5 +1,5 @@
 RADAR_BINARY := radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers
-API_KEY := 1234567890
+API_KEY := radar-dev-key
 API_ENDPOINT := http://localhost:4000
 RADAR_SOURCES := $(shell find radar -name '*.rs')
 
