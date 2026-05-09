@@ -1,7 +1,15 @@
 const HEADER: [u8; 4] = [0xAA, 0xFF, 0x03, 0x00];
 const FOOTER: [u8; 2] = [0x55, 0xCC];
-const MAX_TARGETS: usize = 4;
+const MAX_TARGETS: usize = 3;
 const TARGET_LENGTH: usize = 8;
+pub const TARGETS_LIST_HEADER_LENGTH: usize = HEADER.len();
+pub const TARGETS_LIST_LENGTH: usize = HEADER.len() + MAX_TARGETS * TARGET_LENGTH + FOOTER.len();
+
+pub fn targets_list_header_position(buffer: &[u8]) -> Option<usize> {
+    buffer
+        .windows(HEADER.len())
+        .position(|window| window == HEADER)
+}
 
 pub enum TargetParseError {
     InvalidDataLength,
@@ -55,7 +63,7 @@ fn parse_custom_i16(slice: &[u8]) -> i16 {
 
 #[derive(Debug, defmt::Format)]
 pub struct TargetsList {
-    targets: [Option<Target>; HEADER.len()],
+    targets: [Option<Target>; MAX_TARGETS],
 }
 
 impl TargetsList {
@@ -83,7 +91,7 @@ impl TryFrom<&[u8]> for TargetsList {
     type Error = TargetsListParseError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() < HEADER.len() + TARGET_LENGTH + FOOTER.len() {
+        if value.len() < TARGETS_LIST_LENGTH {
             return Err(TargetsListParseError::DataTooShort(value.len()));
         }
         let header = value[0..HEADER.len()].try_into().unwrap();
