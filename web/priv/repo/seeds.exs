@@ -21,7 +21,7 @@ else
   |> Enum.each(fn i ->
     {:ok, photo} =
       %Radar.Photo{}
-      |> Radar.Photo.changeset(%{
+      |> Radar.Photo.upload_changeset(%{
         filename: "seed_#{i}.jpg",
         tigris_key: "seed_#{i}",
         content_type: "image/jpeg",

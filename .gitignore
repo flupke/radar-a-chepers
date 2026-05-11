@@ -3,3 +3,4 @@
 .nix
 erl_crash.dump
 result
+web/priv/static/uploads/mock_s3/

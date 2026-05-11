@@ -73,7 +73,12 @@ defmodule RadarWeb.Api.PhotoControllerTest do
           "infraction" => @valid_infraction_data
         })
 
-      assert %{"id" => photo_id, "infraction_id" => infraction_id, "filename" => "test_photo.jpg"} =
+      assert %{
+               "id" => photo_id,
+               "infraction_id" => infraction_id,
+               "filename" => "test_photo.jpg",
+               "url" => url
+             } =
                json_response(conn, 201)
 
       assert photo = Repo.get!(Radar.Photo, photo_id)
@@ -87,6 +92,17 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       # Verify the photo record has the Tigris key
       assert String.starts_with?(photo.tigris_key, "radar/photos/")
       assert String.ends_with?(photo.tigris_key, ".jpg")
+
+      assert String.starts_with?(url, "/dev/photos/")
+      expected_image = File.read!(upload.path)
+
+      assert {:ok, ^expected_image, "image/jpeg"} =
+               Radar.MockS3Client.get_object(photo.tigris_key)
+
+      :ets.delete(:mock_s3_store, photo.tigris_key)
+
+      assert {:ok, ^expected_image, "image/jpeg"} =
+               Radar.MockS3Client.get_object(photo.tigris_key)
     end
 
     test "returns error and rolls back transaction if infraction data is invalid", %{
