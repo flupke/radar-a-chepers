@@ -242,6 +242,8 @@ impl InfractionRecorderInner {
         let output = duct::cmd(
             "gphoto2",
             &[
+                "--set-config",
+                "imagequality=JPEG Fine",
                 "--capture-image-and-download",
                 "--force-overwrite",
                 "--filename",
@@ -268,9 +270,22 @@ impl InfractionRecorderInner {
                 stdout
             ));
         }
+        self.ensure_jpeg(&photo_path)?;
         log::info!("Saved photo to {photo_path}");
 
         Ok(())
+    }
+
+    fn ensure_jpeg(&self, photo_path: &Utf8Path) -> Result<()> {
+        let data = std::fs::read(photo_path)?;
+        if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            return Ok(());
+        }
+
+        Err(eyre!(
+            "captured file is not a JPEG: {photo_path}. Check camera imagequality; first bytes are {:#X?}",
+            &data[..data.len().min(8)]
+        ))
     }
 }
 
