@@ -41,7 +41,7 @@ setup-google-oauth: ## Create Google OAuth credentials and set Fly secrets
 
 .PHONY: deploy
 deploy: ## Deploy to Fly.io
-	fly deploy --app $(FLY_APP)
+	fly deploy --local-only --app $(FLY_APP)
 
 .PHONY: console
 console: ## Open a remote IEx console on Fly
