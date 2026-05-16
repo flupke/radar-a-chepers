@@ -9,19 +9,28 @@ defmodule Radar.RadarConfig do
     field :max_dist, :integer, default: 10_000
     field :trigger_cooldown, :integer, default: 1000
     field :aperture_angle, :integer, default: 90
+    field :capture_paused, :boolean, default: false
 
     timestamps()
   end
 
   def changeset(config, attrs) do
     config
-    |> cast(attrs, [:authorized_speed, :min_dist, :max_dist, :trigger_cooldown, :aperture_angle])
+    |> cast(attrs, [
+      :authorized_speed,
+      :min_dist,
+      :max_dist,
+      :trigger_cooldown,
+      :aperture_angle,
+      :capture_paused
+    ])
     |> validate_required([
       :authorized_speed,
       :min_dist,
       :max_dist,
       :trigger_cooldown,
-      :aperture_angle
+      :aperture_angle,
+      :capture_paused
     ])
     |> validate_number(:authorized_speed, greater_than: 0)
     |> validate_number(:min_dist, greater_than_or_equal_to: 0)

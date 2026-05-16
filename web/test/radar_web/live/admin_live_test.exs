@@ -65,6 +65,32 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("#radar-canvas[data-radar-config]")
   end
 
+  test "pauses and resumes camera capture from radar configuration", %{conn: conn} do
+    session =
+      conn
+      |> log_in_admin()
+      |> visit(~p"/admin")
+      |> assert_has("p", "Camera capture is active.")
+      |> assert_has("button[aria-pressed='false']", "Pause radar")
+
+    assert RadarConfigs.config_payload(RadarConfigs.get_config!()).capture_paused == false
+
+    session =
+      session
+      |> click_button("Pause radar")
+      |> assert_has("p", "Camera capture is paused.")
+      |> assert_has("button[aria-pressed='true']", "Resume radar")
+
+    assert RadarConfigs.config_payload(RadarConfigs.get_config!()).capture_paused == true
+
+    session
+    |> click_button("Resume radar")
+    |> assert_has("p", "Camera capture is active.")
+    |> assert_has("button[aria-pressed='false']", "Pause radar")
+
+    assert RadarConfigs.config_payload(RadarConfigs.get_config!()).capture_paused == false
+  end
+
   test "lists infractions with individual photo links and a reliable page archive", %{conn: conn} do
     old_photo = photo_fixture(%{"filename" => "old.jpg", "file_size" => 2048})
     new_photo = photo_fixture(%{"filename" => "new.jpg", "file_size" => 4096})

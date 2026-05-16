@@ -3,10 +3,11 @@ defmodule Radar.RadarConfigsTest do
 
   alias Radar.RadarConfigs
 
-  test "config payload includes aperture angle" do
+  test "config payload includes uploader capture state" do
     config = RadarConfigs.get_config!()
 
     assert RadarConfigs.config_payload(config).aperture_angle == 90
+    assert RadarConfigs.config_payload(config).capture_paused == false
   end
 
   test "update_config persists aperture angle" do
@@ -21,6 +22,13 @@ defmodule Radar.RadarConfigsTest do
 
     assert config.aperture_angle == 75
     assert RadarConfigs.config_payload(config).aperture_angle == 75
+  end
+
+  test "update_config persists capture pause state" do
+    assert {:ok, config} = RadarConfigs.update_config(%{capture_paused: true})
+
+    assert config.capture_paused == true
+    assert RadarConfigs.config_payload(config).capture_paused == true
   end
 
   test "update_config rejects max distance below min distance" do

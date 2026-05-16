@@ -30,7 +30,8 @@ defmodule Radar.RadarConfigs do
       min_dist: config.min_dist,
       max_dist: config.max_dist,
       trigger_cooldown: config.trigger_cooldown,
-      aperture_angle: config.aperture_angle
+      aperture_angle: config.aperture_angle,
+      capture_paused: config.capture_paused
     }
   end
 end

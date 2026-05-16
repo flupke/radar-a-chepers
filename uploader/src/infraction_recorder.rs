@@ -16,6 +16,7 @@ pub struct RadarConfig {
     pub max_dist: f64,
     pub trigger_cooldown: i64,
     pub aperture_angle: i16,
+    pub capture_paused: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,6 +78,7 @@ struct InfractionRecorderInner {
     max_dist: f64,
     trigger_cooldown_ms: i64,
     aperture_angle: i16,
+    capture_paused: bool,
     last_infraction: Option<Infraction>,
     photos_dir: Utf8PathBuf,
     uploader_port: ActorPort<InfractionUploaderCommand>,
@@ -102,18 +104,20 @@ impl Actor for InfractionRecorderInner {
                 }
                 InfractionRecorderCommand::UpdateConfig(config) => {
                     log::info!(
-                        "Config updated: authorized_speed={}, min_dist={}, max_dist={}, trigger_cooldown={}ms, aperture_angle={}",
+                        "Config updated: authorized_speed={}, min_dist={}, max_dist={}, trigger_cooldown={}ms, aperture_angle={}, capture_paused={}",
                         config.authorized_speed,
                         config.min_dist,
                         config.max_dist,
                         config.trigger_cooldown,
-                        config.aperture_angle
+                        config.aperture_angle,
+                        config.capture_paused
                     );
                     self.authorized_speed = config.authorized_speed;
                     self.min_dist = config.min_dist;
                     self.max_dist = config.max_dist;
                     self.trigger_cooldown_ms = config.trigger_cooldown;
                     self.aperture_angle = config.aperture_angle;
+                    self.capture_paused = config.capture_paused;
                 }
             }
         }
@@ -136,6 +140,7 @@ impl InfractionRecorderInner {
             max_dist: 10_000.0,
             trigger_cooldown_ms: 1000,
             aperture_angle: 90,
+            capture_paused: false,
             photos_dir,
             uploader_port,
             target_data_tx,
@@ -169,7 +174,8 @@ impl InfractionRecorderInner {
             }
             None => true,
         };
-        let triggered = in_range && in_aperture && over_speed && cooldown_elapsed;
+        let would_trigger = in_range && in_aperture && over_speed && cooldown_elapsed;
+        let triggered = would_trigger && !self.capture_paused;
 
         let target_data = TargetData {
             speed,
@@ -179,6 +185,10 @@ impl InfractionRecorderInner {
             triggered,
         };
         let _ = self.target_data_tx.send(target_data);
+
+        if would_trigger && self.capture_paused {
+            log::debug!("Capture paused: capture conditions met, not taking picture");
+        }
 
         if triggered {
             let infraction = Infraction {
@@ -314,5 +324,46 @@ impl Infraction {
         let infraction_json = serde_json::to_string(self)?;
         std::fs::write(self.infraction_path(photos_dir), infraction_json)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infraction_uploader::InfractionUploader;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn capture_paused_still_sends_target_data_without_taking_picture() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let temp_dir = tempfile::tempdir().unwrap();
+                let photos_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
+                let uploader = InfractionUploader::new(
+                    photos_dir.clone(),
+                    "http://127.0.0.1:9".to_string(),
+                    "api-key".to_string(),
+                );
+                let (target_data_tx, mut target_data_rx) = broadcast::channel(8);
+                let mut recorder = InfractionRecorderInner::new(
+                    25,
+                    photos_dir.clone(),
+                    uploader.port.clone(),
+                    target_data_tx,
+                    true,
+                );
+                recorder.capture_paused = true;
+
+                recorder
+                    .update("EVENTS: TARGET: 80 0 100".to_string())
+                    .unwrap();
+
+                let target_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(target_data.speed, 80);
+                assert!(!target_data.triggered);
+                assert_eq!(std::fs::read_dir(&photos_dir).unwrap().count(), 0);
+            })
+            .await;
     }
 }

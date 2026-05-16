@@ -2,7 +2,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
   use RadarWeb.ConnCase
   use ExUnit.Case
 
-  alias Radar.Infractions
+  alias Radar.{Infractions, RadarConfigs}
   alias Radar.Repo
 
   @valid_api_key "radar-dev-key"
@@ -103,6 +103,22 @@ defmodule RadarWeb.Api.PhotoControllerTest do
 
       assert {:ok, ^expected_image, "image/jpeg"} =
                Radar.MockS3Client.get_object(photo.tigris_key)
+    end
+
+    test "rejects photo uploads while capture is paused", %{conn: conn, upload: upload} do
+      assert {:ok, _config} = RadarConfigs.update_config(%{capture_paused: true})
+
+      conn =
+        conn
+        |> put_req_header("x-api-key", @valid_api_key)
+        |> post("/api/photos", %{
+          "photo" => upload,
+          "infraction" => @valid_infraction_data
+        })
+
+      assert json_response(conn, 422)["error"] == "Radar capture is paused"
+      assert Repo.all(Radar.Photo) == []
+      assert Infractions.list_recent_infractions() == []
     end
 
     test "returns error and rolls back transaction if infraction data is invalid", %{

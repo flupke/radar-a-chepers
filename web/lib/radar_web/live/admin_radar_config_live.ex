@@ -46,7 +46,23 @@ defmodule RadarWeb.AdminRadarConfigLive do
       <div class="max-w-2xl mx-auto space-y-8">
         <div class="card bg-base-200 shadow-lg">
           <div class="card-body">
-            <h2 class="card-title">Trigger Parameters</h2>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 class="card-title">Trigger Parameters</h2>
+                <p class="text-sm opacity-70">
+                  Camera capture is {capture_status(@config)}.
+                </p>
+              </div>
+              <button
+                type="button"
+                phx-click="toggle_capture"
+                class={capture_button_class(@config)}
+                aria-pressed={to_string(@config.capture_paused)}
+              >
+                <.icon name={capture_button_icon(@config)} class="size-4" />
+                {capture_button_label(@config)}
+              </button>
+            </div>
 
             <.form for={@form} phx-change="update_config" class="space-y-5">
               <.slider_input
@@ -224,6 +240,20 @@ defmodule RadarWeb.AdminRadarConfigLive do
     end
   end
 
+  def handle_event("toggle_capture", _params, socket) do
+    case RadarConfigs.update_config(%{capture_paused: !socket.assigns.config.capture_paused}) do
+      {:ok, config} ->
+        {:noreply,
+         socket
+         |> assign(:config, config)
+         |> assign(:form, config_to_form(config))
+         |> push_config_event(config)}
+
+      {:error, _changeset} ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_info({:config_updated, config}, socket) do
     {:noreply,
      socket
@@ -296,6 +326,23 @@ defmodule RadarWeb.AdminRadarConfigLive do
       "trigger_cooldown" => round(cooldown_s * 1000),
       "aperture_angle" => params["aperture_angle"]
     }
+  end
+
+  defp capture_status(%{capture_paused: true}), do: "paused"
+  defp capture_status(_config), do: "active"
+
+  defp capture_button_label(%{capture_paused: true}), do: "Resume radar"
+  defp capture_button_label(_config), do: "Pause radar"
+
+  defp capture_button_icon(%{capture_paused: true}), do: "hero-play"
+  defp capture_button_icon(_config), do: "hero-pause"
+
+  defp capture_button_class(%{capture_paused: true}) do
+    "btn btn-success shrink-0"
+  end
+
+  defp capture_button_class(_config) do
+    "btn btn-warning shrink-0"
   end
 
   attr :field, Phoenix.HTML.FormField, required: true

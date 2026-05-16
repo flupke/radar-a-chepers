@@ -114,6 +114,10 @@ fn parse_config_payload(payload: &Payload) -> Option<RadarConfig> {
     let max_dist = value.get("max_dist")?.as_f64()?;
     let trigger_cooldown = value.get("trigger_cooldown")?.as_i64()?;
     let aperture_angle = value.get("aperture_angle")?.as_i64()? as i16;
+    let capture_paused = value
+        .get("capture_paused")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
 
     Some(RadarConfig {
         authorized_speed,
@@ -121,5 +125,43 @@ fn parse_config_payload(payload: &Payload) -> Option<RadarConfig> {
         max_dist,
         trigger_cooldown,
         aperture_angle,
+        capture_paused,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(overrides: serde_json::Value) -> Payload {
+        let mut value = serde_json::json!({
+            "authorized_speed": 55,
+            "min_dist": 1000.0,
+            "max_dist": 12000.0,
+            "trigger_cooldown": 2500,
+            "aperture_angle": 75
+        });
+
+        let map = value.as_object_mut().unwrap();
+        for (key, val) in overrides.as_object().unwrap() {
+            map.insert(key.clone(), val.clone());
+        }
+
+        Payload::Value(value)
+    }
+
+    #[test]
+    fn parses_capture_paused_signal_from_config_payload() {
+        let config =
+            parse_config_payload(&payload(serde_json::json!({"capture_paused": true}))).unwrap();
+
+        assert!(config.capture_paused);
+    }
+
+    #[test]
+    fn defaults_capture_paused_to_false_for_old_payloads() {
+        let config = parse_config_payload(&payload(serde_json::json!({}))).unwrap();
+
+        assert!(!config.capture_paused);
+    }
 }
