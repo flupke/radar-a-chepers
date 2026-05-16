@@ -55,6 +55,11 @@ impl Target {
         (speed_mm_s / 1000.0 * 3.6) as i16
     }
 
+    fn speed_cm_s(&self) -> i16 {
+        let speed_mm_s = (self.vx.powi(2) + self.vy.powi(2)).sqrt();
+        (speed_mm_s / 10.0).round() as i16
+    }
+
     fn has_passed(&self) -> bool {
         self.y < -500.0
     }
@@ -85,14 +90,12 @@ impl Actor for FakeRadarReader {
             while !target.has_passed() {
                 let message = format!(
                     "EVENTS: TARGET: {} {} {}",
-                    target.speed_kmh(),
+                    target.speed_cm_s(),
                     target.x as i16,
                     target.y as i16,
                 );
                 log::debug!("Fake radar: {message}");
-                self.infraction_recorder
-                    .process_log_message(message)
-                    .await;
+                self.infraction_recorder.process_log_message(message).await;
                 target.step(dt, &mut rng);
                 sleep(Duration::from_millis(TICK_MS)).await;
             }

@@ -158,7 +158,8 @@ impl InfractionRecorderInner {
         if parts.len() != 3 {
             return Ok(());
         }
-        let speed = parts[0].parse::<i16>().wrap_err("Failed to parse speed")?;
+        let raw_speed_cm_s = parts[0].parse::<i16>().wrap_err("Failed to parse speed")?;
+        let speed = raw_speed_cm_s_to_kmh(raw_speed_cm_s);
         let x = parts[1].parse::<i16>().wrap_err("Failed to parse x")?;
         let y = parts[2].parse::<i16>().wrap_err("Failed to parse y")?;
         let distance = ((x as f64).powi(2) + (y as f64).powi(2)).sqrt();
@@ -299,6 +300,10 @@ impl InfractionRecorderInner {
     }
 }
 
+fn raw_speed_cm_s_to_kmh(raw_speed_cm_s: i16) -> i16 {
+    (f64::from(raw_speed_cm_s) * 0.036).round() as i16
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Infraction {
     pub recorded_speed: i16,
@@ -330,7 +335,118 @@ impl Infraction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infraction_uploader::InfractionUploader;
+    use crate::{
+        actor::{Actor, ActorPort},
+        infraction_uploader::InfractionUploaderCommand,
+    };
+    use tokio::sync::mpsc;
+
+    struct NoopUploader;
+
+    impl Actor for NoopUploader {
+        type Command = InfractionUploaderCommand;
+
+        async fn event_loop(
+            self,
+            _port: ActorPort<Self::Command>,
+            mut command_receiver: mpsc::UnboundedReceiver<Self::Command>,
+        ) {
+            while command_receiver.recv().await.is_some() {}
+        }
+    }
+
+    fn test_recorder(
+        authorized_speed: i16,
+    ) -> (
+        tempfile::TempDir,
+        Utf8PathBuf,
+        InfractionRecorderInner,
+        broadcast::Receiver<TargetData>,
+    ) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let photos_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
+        let (target_data_tx, target_data_rx) = broadcast::channel(8);
+        let recorder = InfractionRecorderInner::new(
+            authorized_speed,
+            photos_dir.clone(),
+            NoopUploader.start(),
+            target_data_tx,
+            true,
+        );
+
+        (temp_dir, photos_dir, recorder, target_data_rx)
+    }
+
+    fn saved_infractions(photos_dir: &Utf8Path) -> Vec<Infraction> {
+        std::fs::read_dir(photos_dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+            .map(|entry| {
+                let json = std::fs::read_to_string(entry.path()).unwrap();
+                serde_json::from_str(&json).unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn converts_rd03d_raw_speed_to_kmh() {
+        assert_eq!(raw_speed_cm_s_to_kmh(0), 0);
+        assert_eq!(raw_speed_cm_s_to_kmh(150), 5);
+        assert_eq!(raw_speed_cm_s_to_kmh(2222), 80);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn converts_raw_centimeters_per_second_before_triggering() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
+
+                recorder
+                    .update("EVENTS: TARGET: 150 0 100".to_string())
+                    .unwrap();
+
+                let target_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(target_data.speed, 5);
+                assert!(target_data.triggered);
+
+                let infractions = saved_infractions(&photos_dir);
+                assert_eq!(infractions.len(), 1);
+                assert_eq!(infractions[0].recorded_speed, 5);
+                assert_eq!(infractions[0].authorized_speed, 4);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn trigger_cooldown_blocks_repeat_infractions() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
+                recorder.trigger_cooldown_ms = 30_000;
+
+                recorder
+                    .update("EVENTS: TARGET: 150 0 100".to_string())
+                    .unwrap();
+                recorder
+                    .update("EVENTS: TARGET: 200 0 100".to_string())
+                    .unwrap();
+
+                let first_target = target_data_rx.try_recv().unwrap();
+                let second_target = target_data_rx.try_recv().unwrap();
+                assert!(first_target.triggered);
+                assert_eq!(first_target.speed, 5);
+                assert!(!second_target.triggered);
+                assert_eq!(second_target.speed, 7);
+
+                assert_eq!(saved_infractions(&photos_dir).len(), 1);
+            })
+            .await;
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn capture_paused_still_sends_target_data_without_taking_picture() {
@@ -338,25 +454,11 @@ mod tests {
 
         local
             .run_until(async {
-                let temp_dir = tempfile::tempdir().unwrap();
-                let photos_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
-                let uploader = InfractionUploader::new(
-                    photos_dir.clone(),
-                    "http://127.0.0.1:9".to_string(),
-                    "api-key".to_string(),
-                );
-                let (target_data_tx, mut target_data_rx) = broadcast::channel(8);
-                let mut recorder = InfractionRecorderInner::new(
-                    25,
-                    photos_dir.clone(),
-                    uploader.port.clone(),
-                    target_data_tx,
-                    true,
-                );
+                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(25);
                 recorder.capture_paused = true;
 
                 recorder
-                    .update("EVENTS: TARGET: 80 0 100".to_string())
+                    .update("EVENTS: TARGET: 2222 0 100".to_string())
                     .unwrap();
 
                 let target_data = target_data_rx.try_recv().unwrap();
