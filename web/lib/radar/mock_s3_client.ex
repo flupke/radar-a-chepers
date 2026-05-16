@@ -33,6 +33,7 @@ defmodule Radar.MockS3Client do
     {:ok, %{}}
   end
 
+  @impl true
   def get_object(key) do
     ensure_table()
 
@@ -42,6 +43,25 @@ defmodule Radar.MockS3Client do
 
       [] ->
         read_object_from_disk(key)
+    end
+  end
+
+  @impl true
+  def stream_object(key) do
+    ensure_table()
+
+    case :ets.lookup(@table, key) do
+      [{^key, data, _content_type}] ->
+        {:ok, binary_stream(data)}
+
+      [] ->
+        path = object_path(key)
+
+        if File.exists?(path) do
+          {:ok, File.stream!(path, [], 64 * 1024)}
+        else
+          {:error, :enoent}
+        end
     end
   end
 
@@ -90,6 +110,18 @@ defmodule Radar.MockS3Client do
       {:ok, data} -> {:ok, data, content_type_for_key(key)}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp binary_stream(data) do
+    Stream.unfold(data, fn
+      "" ->
+        nil
+
+      data ->
+        chunk_size = min(byte_size(data), 64 * 1024)
+        <<chunk::binary-size(chunk_size), rest::binary>> = data
+        {chunk, rest}
+    end)
   end
 
   defp object_path(key) do

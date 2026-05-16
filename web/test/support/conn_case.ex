@@ -27,12 +27,17 @@ defmodule RadarWeb.ConnCase do
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
+      import PhoenixTest
       import RadarWeb.ConnCase
     end
   end
 
   setup tags do
     Radar.DataCase.setup_sandbox(tags)
-    {:ok, conn: Phoenix.ConnTest.build_conn()}
+
+    {:ok,
+     conn:
+       Phoenix.ConnTest.build_conn()
+       |> PhoenixTest.put_endpoint(RadarWeb.Endpoint)}
   end
 end

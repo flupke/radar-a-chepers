@@ -28,6 +28,7 @@ defmodule Radar.MixProject do
           RadarWeb.Endpoint,
           RadarWeb.Telemetry,
           RadarWeb.CoreComponents,
+          RadarWeb.AdminComponents,
           RadarWeb.Layouts,
           RadarWeb.ErrorJSON,
           # Controller actions (dispatched by router)
@@ -37,11 +38,16 @@ defmodule Radar.MixProject do
           # Generated modules
           Radar.Release,
           Radar.Mailer,
+          Radar.ZipStream,
           # S3 behaviour callbacks
           Radar.S3,
           # Context functions called from controllers (invisible to tracer)
           {Radar.Photos, :create_photo, 1},
           {Radar.Photos, :get_photo_url, 2},
+          {Radar.Photos, :get_photo_object, 1},
+          {Radar.Photos, :stream_photo_object, 1},
+          {Radar.Infractions, :list_infractions, 1},
+          {Radar.Infractions, :count_infractions, 0},
           # LiveView on_mount hooks (invoked by framework)
           RadarWeb.AdminAuth
         ]
@@ -79,6 +85,7 @@ defmodule Radar.MixProject do
       {:phoenix_live_reload, "~> 1.6", only: :dev},
       {:phoenix_live_view, "~> 1.1.0-rc.0"},
       {:lazy_html, ">= 0.1.0", only: :test},
+      {:phoenix_test, "~> 0.11.1", only: :test, runtime: false},
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},

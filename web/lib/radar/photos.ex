@@ -69,6 +69,14 @@ defmodule Radar.Photos do
     url
   end
 
+  def get_photo_object(%Photo{} = photo) do
+    s3_client().get_object(photo.tigris_key)
+  end
+
+  def stream_photo_object(%Photo{} = photo) do
+    s3_client().stream_object(photo.tigris_key)
+  end
+
   @doc """
   Deletes a photo from both database and Tigris storage.
   """

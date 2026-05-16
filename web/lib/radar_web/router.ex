@@ -14,6 +14,10 @@ defmodule RadarWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :admin do
+    plug RadarWeb.AdminAuth, :require_authenticated_admin
+  end
+
   scope "/auth", RadarWeb do
     pipe_through :browser
 
@@ -29,10 +33,17 @@ defmodule RadarWeb.Router do
       live "/", RadarLive
       live "/infractions/:id", InfractionLive
     end
+  end
+
+  scope "/admin", RadarWeb do
+    pipe_through [:browser, :admin]
 
     live_session :admin, on_mount: RadarWeb.AdminAuth do
-      live "/admin", AdminLive
+      live "/", AdminRadarConfigLive
+      live "/infractions", AdminInfractionsLive
     end
+
+    get "/infractions/photos.zip", AdminDownloadController, :photos_zip
   end
 
   # API routes with JSON responses
