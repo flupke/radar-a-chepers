@@ -27,10 +27,17 @@ defmodule RadarWeb.Router do
   end
 
   scope "/", RadarWeb do
+    pipe_through [:browser, :admin]
+
+    live_session :admin_home, on_mount: RadarWeb.AdminAuth do
+      live "/", RadarLive
+    end
+  end
+
+  scope "/", RadarWeb do
     pipe_through :browser
 
     live_session :public do
-      live "/", RadarLive
       live "/infractions/:id", InfractionLive
     end
   end

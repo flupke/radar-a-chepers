@@ -9,12 +9,28 @@ defmodule RadarWeb.RadarLiveTest do
   alias Radar.Infractions
   alias Radar.Repo
 
-  setup do
+  setup %{conn: conn} = tags do
     # Clean up any existing data
     Repo.delete_all(Radar.Infraction)
     Repo.delete_all(Radar.Photo)
 
-    :ok
+    conn =
+      if tags[:unauthenticated] do
+        conn
+      else
+        log_in_admin(conn)
+      end
+
+    {:ok, conn: conn}
+  end
+
+  describe "RadarLive authentication" do
+    @tag :unauthenticated
+    test "redirects unauthenticated visitors to admin auth", %{conn: conn} do
+      conn = get(conn, ~p"/")
+
+      assert redirected_to(conn) == ~p"/auth/google"
+    end
   end
 
   describe "RadarLive landing page immediate display" do
@@ -470,5 +486,12 @@ defmodule RadarWeb.RadarLiveTest do
       assert render(view) =~ "100 km/h"
       assert render(view) =~ "Latest Location"
     end
+  end
+
+  defp log_in_admin(conn) do
+    conn
+    |> Plug.Test.init_test_session(%{})
+    |> Plug.Conn.put_session(:admin_email, "admin@test.com")
+    |> Plug.Conn.put_session(:admin_name, "Admin")
   end
 end

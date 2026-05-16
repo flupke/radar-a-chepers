@@ -1,7 +1,7 @@
 defmodule RadarWeb.AdminAuth do
   @moduledoc false
 
-  import Plug.Conn, only: [get_session: 2, halt: 1]
+  import Plug.Conn, only: [get_session: 2, halt: 1, put_session: 3]
   import Phoenix.LiveView
   import Phoenix.Component
 
@@ -25,6 +25,7 @@ defmodule RadarWeb.AdminAuth do
     case admin_from_session(session) do
       nil ->
         conn
+        |> put_session(:admin_return_to, Phoenix.Controller.current_path(conn))
         |> Phoenix.Controller.redirect(to: "/auth/google")
         |> halt()
 
