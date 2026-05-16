@@ -2,7 +2,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
   use RadarWeb.ConnCase
   use ExUnit.Case
 
-  alias Radar.{Infractions, RadarConfigs}
+  alias Radar.{Infractions, Photos, RadarConfigs}
   alias Radar.Repo
 
   @valid_api_key "radar-dev-key"
@@ -77,6 +77,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
                "id" => photo_id,
                "infraction_id" => infraction_id,
                "filename" => "test_photo.jpg",
+               "infraction_json_key" => infraction_json_key,
                "url" => url
              } =
                json_response(conn, 201)
@@ -92,6 +93,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       # Verify the photo record has the Tigris key
       assert String.starts_with?(photo.tigris_key, "radar/photos/")
       assert String.ends_with?(photo.tigris_key, ".jpg")
+      assert infraction_json_key == Photos.infraction_json_key(photo)
 
       assert String.starts_with?(url, "/dev/photos/")
       expected_image = File.read!(upload.path)
@@ -99,10 +101,55 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert {:ok, ^expected_image, "image/jpeg"} =
                Radar.MockS3Client.get_object(photo.tigris_key)
 
+      assert {:ok, infraction_json, "application/json"} =
+               Radar.MockS3Client.get_object(infraction_json_key)
+
+      assert Jason.decode!(infraction_json) == %{
+               "type" => "speed_ticket",
+               "datetime_taken" => "2024-01-15T14:30:00",
+               "recorded_speed" => 78,
+               "authorized_speed" => 55,
+               "location" => "Highway 101 Mile 42"
+             }
+
       :ets.delete(:mock_s3_store, photo.tigris_key)
+      :ets.delete(:mock_s3_store, infraction_json_key)
 
       assert {:ok, ^expected_image, "image/jpeg"} =
                Radar.MockS3Client.get_object(photo.tigris_key)
+
+      assert {:ok, ^infraction_json, "application/json"} =
+               Radar.MockS3Client.get_object(infraction_json_key)
+    end
+
+    @tag capture_log: true
+    test "keeps the photo and infraction when JSON backup storage fails", %{
+      conn: conn,
+      upload: upload
+    } do
+      Process.put(:mock_s3_fail_json_put, true)
+      on_exit(fn -> Process.delete(:mock_s3_fail_json_put) end)
+
+      conn =
+        conn
+        |> put_req_header("x-api-key", @valid_api_key)
+        |> post("/api/photos", %{
+          "photo" => upload,
+          "infraction" => @valid_infraction_data
+        })
+
+      assert %{
+               "id" => photo_id,
+               "infraction_id" => infraction_id,
+               "infraction_json_key" => infraction_json_key
+             } = json_response(conn, 201)
+
+      assert photo = Repo.get!(Radar.Photo, photo_id)
+      assert infraction = Infractions.get_infraction!(infraction_id)
+      assert infraction.photo_id == photo.id
+
+      assert {:ok, _image, "image/jpeg"} = Radar.MockS3Client.get_object(photo.tigris_key)
+      assert {:error, :enoent} = Radar.MockS3Client.get_object(infraction_json_key)
     end
 
     test "rejects photo uploads while capture is paused", %{conn: conn, upload: upload} do
@@ -121,7 +168,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert Infractions.list_recent_infractions() == []
     end
 
-    test "returns error and rolls back transaction if infraction data is invalid", %{
+    test "returns an infraction error without deleting the uploaded photo", %{
       conn: conn,
       upload: upload
     } do
@@ -136,8 +183,20 @@ defmodule RadarWeb.Api.PhotoControllerTest do
         })
 
       assert json_response(conn, 422)["error"] =~ "Failed to create infraction"
-      # Photo should be rolled back
-      assert Repo.all(Radar.Photo) == []
+      assert [photo] = Repo.all(Radar.Photo)
+      assert {:ok, _image, "image/jpeg"} = Radar.MockS3Client.get_object(photo.tigris_key)
+
+      assert {:ok, infraction_json, "application/json"} =
+               Radar.MockS3Client.get_object(Photos.infraction_json_key(photo))
+
+      assert Jason.decode!(infraction_json) == %{
+               "type" => "speed_ticket",
+               "datetime_taken" => "invalid-date",
+               "recorded_speed" => 0,
+               "authorized_speed" => 55,
+               "location" => ""
+             }
+
       assert Infractions.list_recent_infractions() == []
     end
 

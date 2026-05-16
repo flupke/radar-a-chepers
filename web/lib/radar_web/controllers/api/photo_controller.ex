@@ -1,6 +1,8 @@
 defmodule RadarWeb.Api.PhotoController do
   use RadarWeb, :controller
 
+  require Logger
+
   alias Radar.{Infractions, Photos, RadarConfigs}
 
   def create(conn, params) do
@@ -41,6 +43,7 @@ defmodule RadarWeb.Api.PhotoController do
         id: photo.id,
         filename: photo.filename,
         tigris_key: photo.tigris_key,
+        infraction_json_key: Photos.infraction_json_key(photo),
         infraction_id: hd(photo.infractions).id,
         url:
           case Photos.get_photo_url(photo) do
@@ -105,18 +108,28 @@ defmodule RadarWeb.Api.PhotoController do
             "location" => decoded_infraction["location"]
           })
 
+        log_json_backup_result(
+          Infractions.store_json_backup(infraction_attrs, photo),
+          photo.tigris_key
+        )
+
         case Infractions.create_speed_ticket(infraction_attrs) do
           {:ok, infraction} ->
             {:ok, %{photo | infractions: [infraction]}}
 
           {:error, changeset} ->
-            Photos.delete_photo(photo)
             {:error, "Failed to create infraction: #{inspect(changeset.errors)}"}
         end
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp log_json_backup_result({:ok, _json_key}, _infraction), do: :ok
+
+  defp log_json_backup_result({:error, reason}, context) do
+    Logger.warning("Failed to store infraction JSON backup for #{context}: #{inspect(reason)}")
   end
 
   defp parse_integer(value) when is_binary(value) do

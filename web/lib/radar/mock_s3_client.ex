@@ -19,10 +19,15 @@ defmodule Radar.MockS3Client do
   @impl true
   def put_object(key, data, opts) do
     ensure_table()
-    content_type = Keyword.get(opts, :content_type, "application/octet-stream")
-    :ok = write_object_to_disk(key, data)
-    :ets.insert(@table, {key, data, content_type})
-    {:ok, %{}}
+
+    if fail_put?(key) do
+      {:error, :mock_put_failure}
+    else
+      content_type = Keyword.get(opts, :content_type, "application/octet-stream")
+      :ok = write_object_to_disk(key, data)
+      :ets.insert(@table, {key, data, content_type})
+      {:ok, %{}}
+    end
   end
 
   @impl true
@@ -124,6 +129,10 @@ defmodule Radar.MockS3Client do
     end)
   end
 
+  defp fail_put?(key) do
+    Process.get(:mock_s3_fail_json_put, false) and String.ends_with?(key, ".json")
+  end
+
   defp object_path(key) do
     Path.join(storage_dir(), Base.url_encode64(key, padding: false))
   end
@@ -137,6 +146,7 @@ defmodule Radar.MockS3Client do
     cond do
       String.ends_with?(key, [".jpg", ".jpeg"]) -> "image/jpeg"
       String.ends_with?(key, ".png") -> "image/png"
+      String.ends_with?(key, ".json") -> "application/json"
       true -> "application/octet-stream"
     end
   end

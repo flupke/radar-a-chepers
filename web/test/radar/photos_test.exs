@@ -25,6 +25,35 @@ defmodule Radar.PhotosTest do
       refute is_nil(photo.tigris_key)
     end
 
+    test "stores infraction JSON next to the photo object" do
+      assert {:ok, photo} =
+               Photos.create_photo(%{
+                 "filename" => "test_speed_camera.jpg",
+                 "data" => <<255, 216, 255, 224>>,
+                 "content_type" => "image/jpeg",
+                 "file_size" => 4
+               })
+
+      assert Photos.infraction_json_key(photo) == Path.rootname(photo.tigris_key) <> ".json"
+
+      assert {:ok, json_key} =
+               Photos.store_infraction_json(photo, %{
+                 schema_version: 1,
+                 id: "infraction-id",
+                 location: "Highway 101"
+               })
+
+      assert json_key == Photos.infraction_json_key(photo)
+
+      assert {:ok, json, "application/json"} = Radar.MockS3Client.get_object(json_key)
+
+      assert Jason.decode!(json) == %{
+               "schema_version" => 1,
+               "id" => "infraction-id",
+               "location" => "Highway 101"
+             }
+    end
+
     test "validates required upload parameters" do
       # Test with missing data (should cause badarg when trying to get byte_size)
       invalid_params = %{

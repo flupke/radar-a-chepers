@@ -46,8 +46,10 @@ defmodule Radar.MixProject do
           {Radar.Photos, :get_photo_url, 2},
           {Radar.Photos, :get_photo_object, 1},
           {Radar.Photos, :stream_photo_object, 1},
+          {Radar.Infractions, :create_speed_ticket, 1},
           {Radar.Infractions, :list_infractions, 1},
           {Radar.Infractions, :count_infractions, 0},
+          {Radar.Infractions, :store_json_backup, 2},
           # LiveView on_mount hooks (invoked by framework)
           RadarWeb.AdminAuth
         ]

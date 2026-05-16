@@ -33,7 +33,6 @@ defmodule Radar.Photos do
       {:ok, photo}
     else
       {:error, %Ecto.Changeset{} = changeset} ->
-        delete_from_tigris(tigris_key)
         {:error, changeset}
 
       {:error, reason} ->
@@ -77,15 +76,15 @@ defmodule Radar.Photos do
     s3_client().stream_object(photo.tigris_key)
   end
 
-  @doc """
-  Deletes a photo from both database and Tigris storage.
-  """
-  def delete_photo(%Photo{} = photo) do
-    with {:ok, _} <- delete_from_tigris(photo.tigris_key),
-         {:ok, _} <- Repo.delete(photo) do
-      {:ok, photo}
-    else
-      {:error, reason} -> {:error, "Failed to delete photo: #{inspect(reason)}"}
+  def infraction_json_key(%Photo{} = photo) do
+    Path.rootname(photo.tigris_key) <> ".json"
+  end
+
+  def store_infraction_json(%Photo{} = photo, payload) when is_map(payload) do
+    with {:ok, json} <- Jason.encode(payload),
+         {:ok, _} <-
+           upload_to_tigris(infraction_json_key(photo), json <> "\n", "application/json") do
+      {:ok, infraction_json_key(photo)}
     end
   end
 
@@ -94,13 +93,6 @@ defmodule Radar.Photos do
   defp upload_to_tigris(key, file_data, content_type) do
     case s3_client().put_object(key, file_data, content_type: content_type) do
       {:ok, _} -> {:ok, :uploaded}
-      error -> error
-    end
-  end
-
-  defp delete_from_tigris(key) do
-    case s3_client().delete_object(key) do
-      {:ok, _} -> {:ok, :deleted}
       error -> error
     end
   end

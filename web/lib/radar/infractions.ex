@@ -4,8 +4,7 @@ defmodule Radar.Infractions do
   """
 
   import Ecto.Query, warn: false
-  alias Radar.Repo
-  alias Radar.Infraction
+  alias Radar.{Infraction, Photo, Photos, Repo}
 
   @doc """
   Returns the list of recent infractions with preloaded photos.
@@ -66,6 +65,30 @@ defmodule Radar.Infractions do
       error ->
         error
     end
+  end
+
+  def store_json_backup(attrs, %Photo{} = photo) when is_map(attrs) do
+    Photos.store_infraction_json(photo, infraction_json_payload(attrs))
+  end
+
+  defp infraction_json_payload(%Infraction{} = infraction) do
+    %{
+      type: infraction.type,
+      datetime_taken: NaiveDateTime.to_iso8601(infraction.datetime_taken),
+      recorded_speed: infraction.recorded_speed,
+      authorized_speed: infraction.authorized_speed,
+      location: infraction.location
+    }
+  end
+
+  defp infraction_json_payload(attrs) do
+    %{
+      type: Map.get(attrs, "type", "speed_ticket"),
+      datetime_taken: attrs["datetime_taken"],
+      recorded_speed: attrs["recorded_speed"],
+      authorized_speed: attrs["authorized_speed"],
+      location: attrs["location"]
+    }
   end
 
   defp maybe_limit(query, nil), do: query
