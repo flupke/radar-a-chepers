@@ -1,0 +1,11 @@
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-unknown-linux-gnu-gcc"
+
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-unknown-linux-musl-gcc"
+
+[env]
+CC_aarch64_unknown_linux_gnu = "aarch64-unknown-linux-gnu-gcc"
+AR_aarch64_unknown_linux_gnu = "aarch64-unknown-linux-gnu-ar"
+CC_aarch64_unknown_linux_musl = "aarch64-unknown-linux-musl-gcc"
+AR_aarch64_unknown_linux_musl = "aarch64-unknown-linux-musl-ar"

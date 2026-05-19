@@ -80,10 +80,30 @@
           ];
 
           nativeLibPath = lib.makeLibraryPath nativeLibs;
+
+          rpi4CrossTools = lib.optionals (pkgs.stdenv.hostPlatform.system != "aarch64-linux") [
+            (pkgs.runCommand "radar-a-chepers-rpi4-cross-tools" { } ''
+              mkdir -p "$out/bin"
+
+              for dir in \
+                ${pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc}/bin \
+                ${pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc.bintools}/bin \
+                ${pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc}/bin \
+                ${pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc.bintools}/bin
+              do
+                for tool in "$dir"/*; do
+                  name="$(basename "$tool")"
+                  if [ ! -e "$out/bin/$name" ]; then
+                    ln -s "$tool" "$out/bin/$name"
+                  fi
+                done
+              done
+            '')
+          ];
         in
         {
           default = pkgs.mkShell {
-            packages = with pkgs; [
+            packages = (with pkgs; [
               beamPackages.elixir_1_19
               cacert
               cmake
@@ -104,13 +124,15 @@
               python3
               rustup
               sqlite
-            ];
+            ]) ++ rpi4CrossTools;
 
             shellHook = ''
-              export RUSTUP_HOME="$PWD/.nix/rustup"
-              export CARGO_HOME="$PWD/.nix/cargo"
-              export ESPUP_EXPORT_FILE="$PWD/.nix/export-esp.sh"
-              export ESPUP_HOME_DIR="$PWD/.nix/home"
+              repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+              export RUSTUP_HOME="$repo_root/.nix/rustup"
+              export CARGO_HOME="$repo_root/.nix/cargo"
+              export ESPUP_EXPORT_FILE="$repo_root/.nix/export-esp.sh"
+              export ESPUP_HOME_DIR="$repo_root/.nix/home"
               export ESP_TOOLCHAIN_VERSION="1.95.0.0"
               export LIBCLANG_PATH="${lib.getLib pkgs.llvmPackages.libclang}/lib"
               export LD_LIBRARY_PATH="${nativeLibPath}:$LD_LIBRARY_PATH"
@@ -125,6 +147,13 @@
               elif ! rustup default | grep -q '^stable-'; then
                 rustup default stable
               fi
+
+              for target in aarch64-unknown-linux-gnu aarch64-unknown-linux-musl; do
+                if ! rustup target list --installed | grep -q "^$target$"; then
+                  echo "Installing Rust std for $target"
+                  rustup target add "$target"
+                fi
+              done
 
               if [ ! -d "$RUSTUP_HOME/toolchains/esp" ] || [ ! -f "$ESPUP_EXPORT_FILE" ]; then
                 echo "Installing ESP Rust toolchain into $RUSTUP_HOME"
