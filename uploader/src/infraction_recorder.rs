@@ -79,7 +79,7 @@ struct InfractionRecorderInner {
     trigger_cooldown_ms: i64,
     aperture_angle: i16,
     capture_paused: bool,
-    last_infraction: Option<Infraction>,
+    last_capture_attempt_at: Option<DateTime<Utc>>,
     photos_dir: Utf8PathBuf,
     uploader_port: ActorPort<InfractionUploaderCommand>,
     target_data_tx: broadcast::Sender<TargetData>,
@@ -144,7 +144,7 @@ impl InfractionRecorderInner {
             photos_dir,
             uploader_port,
             target_data_tx,
-            last_infraction: None,
+            last_capture_attempt_at: None,
             test_mode,
         }
     }
@@ -168,9 +168,10 @@ impl InfractionRecorderInner {
         let angle = (x as f64).atan2(y as f64).to_degrees().abs();
         let in_aperture = angle <= self.aperture_angle as f64 / 2.0;
         let over_speed = speed > self.authorized_speed;
-        let cooldown_elapsed = match &self.last_infraction {
-            Some(inf) => {
-                Utc::now().signed_duration_since(inf.datetime_taken)
+        let now = Utc::now();
+        let cooldown_elapsed = match self.last_capture_attempt_at {
+            Some(last_attempt_at) => {
+                now.signed_duration_since(last_attempt_at)
                     >= TimeDelta::milliseconds(self.trigger_cooldown_ms)
             }
             None => true,
@@ -196,15 +197,15 @@ impl InfractionRecorderInner {
                 recorded_speed: speed,
                 authorized_speed: self.authorized_speed,
                 location: "Lorgues".to_string(),
-                datetime_taken: Utc::now(),
+                datetime_taken: now,
             };
             log::info!("Infraction: {infraction:#?}");
+            self.last_capture_attempt_at = Some(now);
             self.take_picture(&infraction)?;
             infraction.save_infraction_json(&self.photos_dir)?;
             let _ = self
                 .uploader_port
                 .send(InfractionUploaderCommand::NotifyInfraction);
-            self.last_infraction = Some(infraction);
         }
         Ok(())
     }
@@ -413,6 +414,36 @@ mod tests {
                 assert_eq!(second_target.speed, 7);
 
                 assert_eq!(saved_infractions(&photos_dir).len(), 1);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_capture_attempt_consumes_trigger_cooldown() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, _photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
+                recorder.trigger_cooldown_ms = 30_000;
+                recorder.photos_dir = recorder.photos_dir.join("missing");
+
+                let err = recorder
+                    .update("EVENTS: TARGET: 150 0 100".to_string())
+                    .unwrap_err();
+                assert!(
+                    err.to_string().contains("No such file")
+                        || err.to_string().contains("not found")
+                );
+
+                recorder
+                    .update("EVENTS: TARGET: 200 0 100".to_string())
+                    .unwrap();
+
+                let first_target = target_data_rx.try_recv().unwrap();
+                let second_target = target_data_rx.try_recv().unwrap();
+                assert!(first_target.triggered);
+                assert!(!second_target.triggered);
             })
             .await;
     }
