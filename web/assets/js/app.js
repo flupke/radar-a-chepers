@@ -26,10 +26,43 @@ import {hooks as colocatedHooks} from "phoenix-colocated/radar"
 import topbar from "../vendor/topbar"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
+const Hooks = {
+  ...colocatedHooks,
+  CenterPhotoScroller: {
+    mounted() {
+      this.centerTimeouts = []
+      this.centerScroller = () => {
+        const maxScrollLeft = this.el.scrollWidth - this.el.clientWidth
+
+        if (maxScrollLeft > 0) {
+          this.el.scrollLeft = maxScrollLeft / 2
+        }
+      }
+
+      this.centerAfterLayout = () => {
+        requestAnimationFrame(() => requestAnimationFrame(this.centerScroller))
+        this.centerTimeouts.push(setTimeout(this.centerScroller, 100))
+        this.centerTimeouts.push(setTimeout(this.centerScroller, 300))
+      }
+
+      const image = this.el.querySelector("img")
+
+      if (image && !image.complete) {
+        image.addEventListener("load", this.centerAfterLayout, {once: true})
+      } else {
+        this.centerAfterLayout()
+      }
+    },
+    destroyed() {
+      this.centerTimeouts.forEach(timeout => clearTimeout(timeout))
+    },
+  },
+}
+
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: Hooks,
 })
 
 // Show progress bar on live navigation and form submits
@@ -80,4 +113,3 @@ if (process.env.NODE_ENV === "development") {
     window.liveReloader = reloader
   })
 }
-

@@ -64,3 +64,12 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+.infraction-photo-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.infraction-photo-scroll::-webkit-scrollbar {
+  display: none;
+}
