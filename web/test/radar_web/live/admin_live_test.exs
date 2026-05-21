@@ -5,6 +5,7 @@ defmodule RadarWeb.AdminLiveTest do
   import Radar.PhotosFixtures
 
   alias Radar.{RadarConfigs, Repo}
+  alias RadarWeb.Presence
 
   @uploader_debug_topic "uploader_debug"
 
@@ -23,9 +24,10 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("a[href='/admin/infractions']", "Infractions")
     |> assert_has("h2", "Trigger Parameters")
     |> assert_has("h2", "Live Radar Data")
-    |> assert_has("h2", "Uploader Debug")
+    |> assert_has("h2", "Uploader Status")
     |> assert_has("#uploader-connected", "No")
     |> assert_has("#radar-canvas")
+    |> assert_has("#last-target", "No targets yet.")
   end
 
   test "shows uploader connection state and live logs", %{conn: conn} do
@@ -36,11 +38,6 @@ defmodule RadarWeb.AdminLiveTest do
       |> assert_has("#uploader-connected", "No")
       |> assert_has("#uploader-logs", "No uploader logs yet.")
 
-    Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {:uploader_connected, true})
-
-    session
-    |> assert_has("#uploader-connected", "Yes")
-
     Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {
       :uploader_log,
       %{id: 1, at: ~U[2026-05-21 09:00:00Z], level: "debug", message: "radar booted"}
@@ -50,10 +47,22 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("#uploader-logs", "radar booted")
     |> assert_has("#uploader-logs", "DEBUG")
 
-    Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {:uploader_connected, false})
-
     session
-    |> assert_has("#uploader-connected", "No")
+    |> assert_has("#uploader-connected", "Yes")
+  end
+
+  test "shows uploader connected when the uploader joined before the admin page mounted", %{
+    conn: conn
+  } do
+    uploader_pid = self()
+
+    {:ok, _ref} = Presence.track_uploader(uploader_pid)
+    on_exit(fn -> Presence.untrack_uploader(uploader_pid) end)
+
+    conn
+    |> log_in_admin()
+    |> visit(~p"/admin")
+    |> assert_has("#uploader-connected", "Yes")
   end
 
   test "marks uploader connected when logs arrive", %{conn: conn} do
@@ -82,11 +91,28 @@ defmodule RadarWeb.AdminLiveTest do
 
     Phoenix.PubSub.broadcast(Radar.PubSub, "radar_data", {
       :target_data,
-      %{"x" => 1, "y" => 2, "speed" => 3, "distance" => 4, "triggered" => false}
+      %{
+        "raw_speed_cm_s" => 83,
+        "x" => 1,
+        "y" => 2,
+        "speed" => 3,
+        "distance" => 4,
+        "angle" => 26.6,
+        "in_range" => true,
+        "in_aperture" => true,
+        "over_speed" => false,
+        "cooldown_elapsed" => true,
+        "capture_paused" => false,
+        "would_trigger" => false,
+        "triggered" => false
+      }
     })
 
     session
     |> assert_has("#uploader-connected", "Yes")
+    |> assert_has("#last-target", "3 km/h")
+    |> assert_has("#last-target", "83 cm/s")
+    |> assert_has("#last-target", "Over speed")
   end
 
   test "persists radar configuration changes and restores canvas limits after reload", %{

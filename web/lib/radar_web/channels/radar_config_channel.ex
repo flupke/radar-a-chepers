@@ -2,27 +2,31 @@ defmodule RadarWeb.RadarConfigChannel do
   @moduledoc false
   use RadarWeb, :channel
 
+  require Logger
+
   alias Radar.RadarConfigs
 
   @uploader_debug_topic "uploader_debug"
-
   @impl true
   def join("radar:config", _payload, socket) do
-    Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {:uploader_connected, true})
+    case RadarWeb.Presence.track_uploader(self()) do
+      {:ok, _ref} -> :ok
+      {:error, reason} -> Logger.warning("Failed to track uploader presence: #{inspect(reason)}")
+    end
+
     Phoenix.PubSub.subscribe(Radar.PubSub, "radar_config")
     {:ok, socket}
-  end
-
-  @impl true
-  def terminate(_reason, _socket) do
-    Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {:uploader_connected, false})
-    :ok
   end
 
   @impl true
   def handle_in("get_config", _payload, socket) do
     config = RadarConfigs.get_config!()
     {:reply, {:ok, RadarConfigs.config_payload(config)}, socket}
+  end
+
+  @impl true
+  def handle_in("ping", _payload, socket) do
+    {:reply, {:ok, %{}}, socket}
   end
 
   @impl true

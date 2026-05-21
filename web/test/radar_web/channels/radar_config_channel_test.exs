@@ -3,6 +3,7 @@ defmodule RadarWeb.RadarConfigChannelTest do
 
   alias Radar.RadarConfigs
   alias RadarWeb.RadarConfigChannel
+  alias RadarWeb.Presence
 
   @uploader_debug_topic "uploader_debug"
 
@@ -26,6 +27,16 @@ defmodule RadarWeb.RadarConfigChannelTest do
     assert_push "config_updated", %{capture_paused: true}
   end
 
+  test "replies to uploader ping health checks" do
+    assert {:ok, _reply, socket} =
+             Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
+             |> subscribe_and_join(RadarConfigChannel, "radar:config")
+
+    ref = push(socket, "ping", %{})
+
+    assert_reply ref, :ok, %{}
+  end
+
   test "continues forwarding target data while capture is paused" do
     assert {:ok, _reply, socket} =
              Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
@@ -40,13 +51,16 @@ defmodule RadarWeb.RadarConfigChannelTest do
   end
 
   test "tracks uploader channel joins" do
-    Phoenix.PubSub.subscribe(Radar.PubSub, @uploader_debug_topic)
+    Phoenix.PubSub.subscribe(Radar.PubSub, Presence.uploader_topic())
 
     assert {:ok, _reply, _socket} =
              Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
              |> subscribe_and_join(RadarConfigChannel, "radar:config")
 
-    assert_receive {:uploader_connected, true}
+    assert_receive %Phoenix.Socket.Broadcast{
+      event: "presence_diff",
+      payload: %{joins: %{"uploader" => %{metas: [_meta | _]}}}
+    }
   end
 
   test "accepts live uploader logs" do
@@ -55,8 +69,6 @@ defmodule RadarWeb.RadarConfigChannelTest do
     assert {:ok, _reply, socket} =
              Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
              |> subscribe_and_join(RadarConfigChannel, "radar:config")
-
-    assert_receive {:uploader_connected, true}
 
     push(socket, "uploader_log", %{"message" => "radar booted", "level" => "debug"})
 
@@ -71,8 +83,6 @@ defmodule RadarWeb.RadarConfigChannelTest do
     assert {:ok, _reply, socket} =
              Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
              |> subscribe_and_join(RadarConfigChannel, "radar:config")
-
-    assert_receive {:uploader_connected, true}
 
     push(socket, "uploader_log", %{
       "message" => "EVENTS: TARGET: 150 0 100",

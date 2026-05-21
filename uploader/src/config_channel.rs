@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use phoenix_channels_client::{Client, Config, Payload};
 use tokio::sync::broadcast;
+use tokio::time::{self, Instant};
 
 use crate::{
     infraction_recorder::{RadarConfig, TargetData},
@@ -85,29 +86,46 @@ async fn connect_and_run(
         .await
         .map_err(|e| eyre::eyre!("on error: {e}"))?;
 
-    // Throttle target data sending to ~5 Hz
-    let mut last_target_send = tokio::time::Instant::now();
-    let throttle_interval = Duration::from_millis(200);
+    let ping_interval = Duration::from_secs(15);
+    let mut ping = time::interval_at(Instant::now() + ping_interval, ping_interval);
+    ping.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
+            _ = ping.tick() => {
+                if let Err(e) = channel
+                    .send_with_timeout(
+                        "ping",
+                        serde_json::json!({}),
+                        Some(Duration::from_secs(5)),
+                    )
+                    .await
+                {
+                    log::error!("Config channel ping failed: {e}, reconnecting...");
+                    break;
+                }
+            },
             target_data = target_data_rx.recv() => {
                 match target_data {
                     Ok(data) => {
-                        let now = tokio::time::Instant::now();
-                        if now.duration_since(last_target_send) >= throttle_interval {
-                            let payload = serde_json::json!({
-                                "speed": data.speed,
-                                "x": data.x,
-                                "y": data.y,
-                                "distance": data.distance,
-                                "triggered": data.triggered,
-                            });
-                            if let Err(e) = channel.send_noreply("target_data", payload).await {
-                                log::error!("Failed to send target data: {e}");
-                                break;
-                            }
-                            last_target_send = now;
+                        let payload = serde_json::json!({
+                            "raw_speed_cm_s": data.raw_speed_cm_s,
+                            "speed": data.speed,
+                            "x": data.x,
+                            "y": data.y,
+                            "distance": data.distance,
+                            "angle": data.angle,
+                            "in_range": data.in_range,
+                            "in_aperture": data.in_aperture,
+                            "over_speed": data.over_speed,
+                            "cooldown_elapsed": data.cooldown_elapsed,
+                            "capture_paused": data.capture_paused,
+                            "would_trigger": data.would_trigger,
+                            "triggered": data.triggered,
+                        });
+                        if let Err(e) = channel.send_noreply("target_data", payload).await {
+                            log::error!("Failed to send target data: {e}");
+                            break;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,

@@ -5,8 +5,8 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   alias Radar.{Infractions, RadarConfigs}
   alias Phoenix.LiveView.ColocatedHook
+  alias RadarWeb.Presence
 
-  @throttle_ms 100
   @max_uploader_logs 100
   @uploader_debug_topic "uploader_debug"
 
@@ -16,6 +16,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
       Phoenix.PubSub.subscribe(Radar.PubSub, "radar_data")
       Phoenix.PubSub.subscribe(Radar.PubSub, "infractions")
       Phoenix.PubSub.subscribe(Radar.PubSub, @uploader_debug_topic)
+      Phoenix.PubSub.subscribe(Radar.PubSub, Presence.uploader_topic())
     end
 
     config = RadarConfigs.get_config!()
@@ -25,8 +26,8 @@ defmodule RadarWeb.AdminRadarConfigLive do
       |> assign(:config, config)
       |> assign(:form, config_to_form(config))
       |> assign(:infraction_count, Infractions.count_infractions())
-      |> assign(:uploader_debug, %{connected: false, logs: []})
-      |> assign(:last_ui_update, System.monotonic_time(:millisecond) - @throttle_ms)
+      |> assign(:uploader_debug, %{connected: Presence.uploader_connected?(), logs: []})
+      |> assign(:last_target, nil)
       |> push_config_event(config)
 
     {:ok, socket}
@@ -119,6 +120,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
             <canvas
               id="radar-canvas"
               phx-hook=".RadarCanvas"
+              phx-update="ignore"
               data-radar-config={Jason.encode!(RadarConfigs.config_payload(@config))}
               width="600"
               height="400"
@@ -135,7 +137,6 @@ defmodule RadarWeb.AdminRadarConfigLive do
                   const dots = [];
                   let cfg = JSON.parse(canvas.dataset.radarConfig || "null");
                   const FADE_MS = 4000;
-                  const VIEW_RANGE = 15000;
 
                   this.handleEvent("radar_point", (data) => {
                     dots.push({ ...data, time: performance.now() });
@@ -149,7 +150,8 @@ defmodule RadarWeb.AdminRadarConfigLive do
                     const now = performance.now();
                     const w = canvas.width;
                     const h = canvas.height;
-                    const scale = h / VIEW_RANGE;
+                    const viewRange = Math.max(cfg?.max_dist || 8000, 8000);
+                    const scale = h / viewRange;
 
                     while (dots.length > 0 && now - dots[0].time > FADE_MS) dots.shift();
 
@@ -160,7 +162,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
                       const cx = w / 2;
                       const cy = h;
                       const halfAngle = (cfg.aperture_angle || 180) * Math.PI / 360;
-                      const boundaryLength = VIEW_RANGE;
+                      const boundaryLength = viewRange;
                       ctx.setLineDash([6, 6]);
                       ctx.lineWidth = 2;
                       ctx.strokeStyle = "rgba(251, 191, 36, 0.65)";
@@ -196,19 +198,27 @@ defmodule RadarWeb.AdminRadarConfigLive do
                       const inRange = !cfg || (cfg.min_dist <= dot.distance && dot.distance <= cfg.max_dist);
                       const active = inAperture && inRange;
 
-                      const ratio = cfg ? Math.min(dot.speed / (cfg.authorized_speed * 2), 1) : 0.5;
+                      const ratio = cfg && cfg.authorized_speed > 0
+                        ? Math.min(dot.speed / (cfg.authorized_speed * 2), 1)
+                        : 0.5;
                       const hue = 120 * (1 - ratio);
+                      const radius = dot.triggered ? 8 : 7;
 
                       ctx.beginPath();
-                      ctx.arc(px, py, 5, 0, Math.PI * 2);
+                      ctx.arc(px, py, radius, 0, Math.PI * 2);
                       ctx.fillStyle = active
-                        ? `hsla(${hue}, 90%, 55%, ${opacity})`
-                        : `hsla(215, 8%, 65%, ${opacity * 0.35})`;
+                        ? `hsla(${hue}, 90%, 55%, ${Math.max(opacity, 0.35)})`
+                        : `hsla(205, 90%, 70%, ${Math.max(opacity * 0.85, 0.25)})`;
                       ctx.fill();
+                      ctx.lineWidth = active ? 2 : 1;
+                      ctx.strokeStyle = active
+                        ? `hsla(${hue}, 90%, 85%, ${Math.max(opacity, 0.45)})`
+                        : `hsla(205, 90%, 90%, ${Math.max(opacity * 0.75, 0.25)})`;
+                      ctx.stroke();
 
                       if (dot.triggered) {
                         ctx.beginPath();
-                        ctx.arc(px, py, 12, 0, Math.PI * 2);
+                        ctx.arc(px, py, 14, 0, Math.PI * 2);
                         ctx.strokeStyle = `hsla(${hue}, 90%, 55%, ${opacity})`;
                         ctx.lineWidth = 2;
                         ctx.stroke();
@@ -221,13 +231,62 @@ defmodule RadarWeb.AdminRadarConfigLive do
                 }
               }
             </script>
+            <div id="last-target" class="mt-4 rounded-lg bg-base-300 p-3 text-sm">
+              <p :if={!@last_target} class="opacity-70">No targets yet.</p>
+              <div :if={@last_target} class="grid gap-3 lg:grid-cols-2">
+                <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+                  <span class="opacity-70">Speed</span>
+                  <span class="font-mono">
+                    {@last_target.speed} km/h ({@last_target.raw_speed_cm_s} cm/s)
+                  </span>
+                  <span class="opacity-70">Distance</span>
+                  <span class="font-mono">{format_mm_as_m(@last_target.distance)}</span>
+                  <span class="opacity-70">Angle</span>
+                  <span class="font-mono">{format_degrees(@last_target.angle)}</span>
+                  <span class="opacity-70">Position</span>
+                  <span class="font-mono">
+                    x {format_mm_as_m(@last_target.x)}, y {format_mm_as_m(@last_target.y)}
+                  </span>
+                </div>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+                  <span class="opacity-70">In range</span>
+                  <span class={debug_bool_class(@last_target.in_range)}>
+                    {yes_no(@last_target.in_range)}
+                  </span>
+                  <span class="opacity-70">In aperture</span>
+                  <span class={debug_bool_class(@last_target.in_aperture)}>
+                    {yes_no(@last_target.in_aperture)}
+                  </span>
+                  <span class="opacity-70">Over speed</span>
+                  <span class={debug_bool_class(@last_target.over_speed)}>
+                    {yes_no(@last_target.over_speed)}
+                  </span>
+                  <span class="opacity-70">Cooldown</span>
+                  <span class={debug_bool_class(@last_target.cooldown_elapsed)}>
+                    {yes_no(@last_target.cooldown_elapsed)}
+                  </span>
+                  <span class="opacity-70">Capture paused</span>
+                  <span class={debug_bool_class(!@last_target.capture_paused)}>
+                    {yes_no(@last_target.capture_paused)}
+                  </span>
+                  <span class="opacity-70">Would capture</span>
+                  <span class={debug_bool_class(@last_target.would_trigger)}>
+                    {yes_no(@last_target.would_trigger)}
+                  </span>
+                  <span class="opacity-70">Captured</span>
+                  <span class={debug_bool_class(@last_target.triggered)}>
+                    {yes_no(@last_target.triggered)}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         <div class="card bg-base-200 shadow-lg">
           <div class="card-body gap-4">
             <div class="flex items-center justify-between gap-4">
-              <h2 class="card-title">Uploader Debug</h2>
+              <h2 class="card-title">Uploader Status</h2>
               <div id="uploader-connected" class="flex items-center gap-2 text-sm">
                 <span class="opacity-70">Uploader connected</span>
                 <span class={uploader_status_class(@uploader_debug.connected)}>
@@ -322,8 +381,31 @@ defmodule RadarWeb.AdminRadarConfigLive do
     {:noreply, assign(socket, :infraction_count, Infractions.count_infractions())}
   end
 
-  def handle_info({:uploader_connected, connected}, socket) do
-    {:noreply, update(socket, :uploader_debug, &%{&1 | connected: connected})}
+  def handle_info(
+        %Phoenix.Socket.Broadcast{
+          event: "presence_diff",
+          topic: topic,
+          payload: %{joins: joins, leaves: leaves}
+        },
+        socket
+      ) do
+    if topic == Presence.uploader_topic() do
+      connected =
+        cond do
+          Map.has_key?(joins, Presence.uploader_key()) ->
+            true
+
+          Map.has_key?(leaves, Presence.uploader_key()) ->
+            Presence.uploader_connected?()
+
+          true ->
+            socket.assigns.uploader_debug.connected
+        end
+
+      {:noreply, update(socket, :uploader_debug, &%{&1 | connected: connected})}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:uploader_log, log}, socket) do
@@ -331,23 +413,19 @@ defmodule RadarWeb.AdminRadarConfigLive do
   end
 
   def handle_info({:target_data, data}, socket) do
-    now = System.monotonic_time(:millisecond)
-    socket = update(socket, :uploader_debug, &%{&1 | connected: true})
+    target = normalize_target_data(data)
 
-    if now - socket.assigns.last_ui_update >= @throttle_ms do
-      {:noreply,
-       socket
-       |> push_event("radar_point", %{
-         x: data["x"],
-         y: data["y"],
-         speed: data["speed"],
-         distance: data["distance"],
-         triggered: data["triggered"]
-       })
-       |> assign(:last_ui_update, now)}
-    else
-      {:noreply, socket}
-    end
+    socket =
+      if socket.assigns.uploader_debug.connected do
+        socket
+      else
+        update(socket, :uploader_debug, &%{&1 | connected: true})
+      end
+
+    {:noreply,
+     socket
+     |> assign(:last_target, target)
+     |> push_event("radar_point", Map.take(target, [:x, :y, :speed, :distance, :triggered]))}
   end
 
   defp legacy_infractions_path(params) do
@@ -413,6 +491,9 @@ defmodule RadarWeb.AdminRadarConfigLive do
   defp yes_no(true), do: "Yes"
   defp yes_no(false), do: "No"
 
+  defp debug_bool_class(true), do: "font-mono text-success"
+  defp debug_bool_class(false), do: "font-mono text-error"
+
   defp uploader_status_class(true), do: "badge badge-success"
   defp uploader_status_class(false), do: "badge badge-error"
 
@@ -424,6 +505,54 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   defp last_log_id([]), do: ""
   defp last_log_id(logs), do: logs |> List.last() |> Map.fetch!(:id)
+
+  defp format_mm_as_m(value) when is_number(value) do
+    "#{Float.round(value / 1000, 2)} m"
+  end
+
+  defp format_mm_as_m(_value), do: "--"
+
+  defp format_degrees(value) when is_number(value) do
+    "#{Float.round(value, 1)} deg"
+  end
+
+  defp format_degrees(_value), do: "--"
+
+  defp normalize_target_data(data) do
+    %{
+      raw_speed_cm_s: target_number(data, "raw_speed_cm_s", 0),
+      speed: target_number(data, "speed", 0),
+      x: target_number(data, "x", 0),
+      y: target_number(data, "y", 0),
+      distance: target_number(data, "distance", 0.0),
+      angle: target_number(data, "angle", 0.0),
+      in_range: target_bool(data, "in_range"),
+      in_aperture: target_bool(data, "in_aperture"),
+      over_speed: target_bool(data, "over_speed"),
+      cooldown_elapsed: target_bool(data, "cooldown_elapsed"),
+      capture_paused: target_bool(data, "capture_paused"),
+      would_trigger: target_bool(data, "would_trigger"),
+      triggered: target_bool(data, "triggered")
+    }
+  end
+
+  defp target_number(data, key, default) do
+    case Map.get(data, key, Map.get(data, String.to_existing_atom(key), default)) do
+      value when is_number(value) -> value
+      _value -> default
+    end
+  rescue
+    ArgumentError -> Map.get(data, key, default)
+  end
+
+  defp target_bool(data, key) do
+    case Map.get(data, key, Map.get(data, String.to_existing_atom(key), false)) do
+      true -> true
+      _value -> false
+    end
+  rescue
+    ArgumentError -> Map.get(data, key, false) == true
+  end
 
   defp append_uploader_log(debug, log) do
     logs =
