@@ -3,7 +3,6 @@ use std::time::Duration;
 use camino::Utf8PathBuf;
 use defmt_decoder::{DecodeError, Table};
 use tokio::io::AsyncReadExt;
-use tokio::time::sleep;
 use tokio_serial::{SerialPort, SerialPortBuilderExt};
 
 use crate::{actor::Actor, infraction_recorder::InfractionRecorder};
@@ -72,12 +71,6 @@ impl Actor for RadarReader {
                                 self.infraction_recorder
                                     .process_log_message(log_message)
                                     .await;
-                                // Clear buffer after taking a photo so we don't re-trigger a photo
-                                // immediately
-                                sleep(Duration::from_millis(100)).await;
-                                if let Err(err) = port.clear(tokio_serial::ClearBuffer::Input) {
-                                    log::error!("Failed to clear serial input buffer: {err}");
-                                }
                             }
                             Err(DecodeError::UnexpectedEof) => {
                                 // Need more data

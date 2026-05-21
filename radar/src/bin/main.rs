@@ -13,20 +13,20 @@ use bt_hci::controller::ExternalController;
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::{
-    Async,
     clock::CpuClock,
     timer::{systimer::SystemTimer, timg::TimerGroup},
     uart::{Config, DataBits, Parity, StopBits, Uart, UartRx, UartTx},
+    Async,
 };
 use esp_println as _;
 use esp_wifi::ble::controller::BleConnector;
 use radar_a_chepers::{
     command::{
         CLOSE_COMMAND_MODE, FRAME_FOOTER, FRAME_HEADER, OPEN_COMMAND_MODE, RESPONSE_FRAME_HEADER,
-        SET_SINGLE_TARGET,
+        SET_MULTI_TARGET,
     },
     target::{
-        TARGETS_LIST_HEADER_LENGTH, TARGETS_LIST_LENGTH, TargetsList, targets_list_header_position,
+        targets_list_header_position, TargetsList, TARGETS_LIST_HEADER_LENGTH, TARGETS_LIST_LENGTH,
     },
 };
 
@@ -238,7 +238,7 @@ async fn configure_radar(tx: &mut UartTx<'static, Async>, rx: &mut UartRx<'stati
 
         let result = async {
             send_command_and_wait_for_ack(tx, rx, OPEN_COMMAND_MODE.get()).await?;
-            send_command_and_wait_for_ack(tx, rx, SET_SINGLE_TARGET.get()).await?;
+            send_command_and_wait_for_ack(tx, rx, SET_MULTI_TARGET.get()).await?;
             send_command_and_wait_for_ack(tx, rx, CLOSE_COMMAND_MODE.get()).await?;
             Ok(())
         }
@@ -247,7 +247,7 @@ async fn configure_radar(tx: &mut UartTx<'static, Async>, rx: &mut UartRx<'stati
         match result {
             Ok(()) => {
                 flush_rx(rx).await;
-                defmt::info!("Entered single target mode");
+                defmt::info!("Entered multi target mode");
                 return;
             }
             Err(()) => {

@@ -24,10 +24,18 @@ pub struct RadarConfig {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TargetData {
+    pub raw_speed_cm_s: i16,
     pub speed: i16,
     pub x: i16,
     pub y: i16,
     pub distance: f64,
+    pub angle: f64,
+    pub in_range: bool,
+    pub in_aperture: bool,
+    pub over_speed: bool,
+    pub cooldown_elapsed: bool,
+    pub capture_paused: bool,
+    pub would_trigger: bool,
     pub triggered: bool,
 }
 
@@ -169,7 +177,7 @@ impl InfractionRecorderInner {
             return Ok(());
         }
         let raw_speed_cm_s = parts[0].parse::<i16>().wrap_err("Failed to parse speed")?;
-        let speed = raw_speed_cm_s_to_kmh(raw_speed_cm_s);
+        let speed = raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s);
         let x = parts[1].parse::<i16>().wrap_err("Failed to parse x")?;
         let y = parts[2].parse::<i16>().wrap_err("Failed to parse y")?;
         let distance = ((x as f64).powi(2) + (y as f64).powi(2)).sqrt();
@@ -190,10 +198,18 @@ impl InfractionRecorderInner {
         let triggered = would_trigger && !self.capture_paused;
 
         let target_data = TargetData {
+            raw_speed_cm_s,
             speed,
             x,
             y,
             distance,
+            angle,
+            in_range,
+            in_aperture,
+            over_speed,
+            cooldown_elapsed,
+            capture_paused: self.capture_paused,
+            would_trigger,
             triggered,
         };
         let _ = self.target_data_tx.send(target_data);
@@ -284,8 +300,8 @@ fn is_target_message(message: &str) -> bool {
     message.starts_with(TARGET_PREFIX)
 }
 
-fn raw_speed_cm_s_to_kmh(raw_speed_cm_s: i16) -> i16 {
-    (f64::from(raw_speed_cm_s) * 0.036).round() as i16
+fn raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s: i16) -> i16 {
+    (f64::from(raw_speed_cm_s).abs() * 0.036).round() as i16
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -404,9 +420,10 @@ mod tests {
 
     #[test]
     fn converts_rd03d_raw_speed_to_kmh() {
-        assert_eq!(raw_speed_cm_s_to_kmh(0), 0);
-        assert_eq!(raw_speed_cm_s_to_kmh(150), 5);
-        assert_eq!(raw_speed_cm_s_to_kmh(2222), 80);
+        assert_eq!(raw_speed_cm_s_to_abs_kmh(0), 0);
+        assert_eq!(raw_speed_cm_s_to_abs_kmh(150), 5);
+        assert_eq!(raw_speed_cm_s_to_abs_kmh(-150), 5);
+        assert_eq!(raw_speed_cm_s_to_abs_kmh(2222), 80);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -477,6 +494,29 @@ mod tests {
                 assert_eq!(infractions.len(), 1);
                 assert_eq!(infractions[0].recorded_speed, 5);
                 assert_eq!(infractions[0].authorized_speed, 4);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn negative_raw_speed_can_trigger() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
+
+                recorder
+                    .update("EVENTS: TARGET: -150 0 100".to_string())
+                    .unwrap();
+
+                let target_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(target_data.speed, 5);
+                assert!(target_data.triggered);
+
+                let infractions = saved_infractions(&photos_dir);
+                assert_eq!(infractions.len(), 1);
+                assert_eq!(infractions[0].recorded_speed, 5);
             })
             .await;
     }
