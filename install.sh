@@ -11,6 +11,7 @@ FLY_APP_URL="${FLY_APP_URL%/}"
 
 UPLOADER_TARGET="${UPLOADER_TARGET:-aarch64-unknown-linux-musl}"
 UPLOADER_BINARY="${ROOT_DIR}/uploader/target/${UPLOADER_TARGET}/release/uploader"
+ESPFLASH_BINARY="${ROOT_DIR}/.nix/espflash/${UPLOADER_TARGET}/bin/espflash"
 
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
 RADAR_BINARY="${RADAR_BINARY:-${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers}"
@@ -20,6 +21,7 @@ REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/radar-a-chepers}"
 REMOTE_ENV_FILE="${REMOTE_ENV_FILE:-${REMOTE_APP_DIR}/.env}"
 REMOTE_INFRACTIONS_DIR="${REMOTE_INFRACTIONS_DIR:-/var/lib/radar-a-chepers/infractions}"
 REMOTE_RADAR_BINARY="${REMOTE_RADAR_BINARY:-${REMOTE_APP_DIR}/radar-a-chepers}"
+REMOTE_ESPFLASH_BINARY="/usr/local/bin/espflash"
 REMOTE_SERVICE_NAME="${REMOTE_SERVICE_NAME:-radar-uploader.service}"
 RUST_LOG="${RUST_LOG:-info}"
 
@@ -72,7 +74,7 @@ cleanup() {
 trap cleanup EXIT
 
 target_linker() {
-  case "$UPLOADER_TARGET" in
+  case "$1" in
     aarch64-unknown-linux-gnu)
       printf '%s\n' "aarch64-unknown-linux-gnu-gcc"
       ;;
@@ -83,6 +85,26 @@ target_linker() {
       printf '%s\n' ""
       ;;
   esac
+}
+
+target_ar() {
+  case "$1" in
+    aarch64-unknown-linux-gnu)
+      printf '%s\n' "aarch64-unknown-linux-gnu-ar"
+      ;;
+    aarch64-unknown-linux-musl)
+      printf '%s\n' "aarch64-unknown-linux-musl-ar"
+      ;;
+    *)
+      printf '%s\n' ""
+      ;;
+  esac
+}
+
+target_env_name() {
+  local target="$1"
+  target="${target//-/_}"
+  printf '%s\n' "${target^^}"
 }
 
 run_cargo() {
@@ -103,7 +125,7 @@ run_cargo() {
 build_uploader() {
   local linker
 
-  linker="$(target_linker)"
+  linker="$(target_linker "$UPLOADER_TARGET")"
 
   echo "==> Building uploader for ${UPLOADER_TARGET}..."
 
@@ -119,6 +141,55 @@ build_uploader() {
 
   if [ ! -f "$UPLOADER_BINARY" ]; then
     echo "error: Expected uploader binary was not produced: ${UPLOADER_BINARY}" >&2
+    exit 1
+  fi
+}
+
+build_espflash() {
+  local linker
+  local ar
+  local target_env
+
+  if [ -x "$ESPFLASH_BINARY" ]; then
+    return
+  fi
+
+  linker="$(target_linker "$UPLOADER_TARGET")"
+  ar="$(target_ar "$UPLOADER_TARGET")"
+  target_env="$(target_env_name "$UPLOADER_TARGET")"
+
+  echo "==> Building espflash for ${UPLOADER_TARGET}..."
+
+  if [ -z "$linker" ]; then
+    echo "error: Unsupported espflash target: ${UPLOADER_TARGET}" >&2
+    exit 1
+  fi
+
+  if command -v cargo >/dev/null 2>&1 && command -v "$linker" >/dev/null 2>&1 && command -v "$ar" >/dev/null 2>&1; then
+    (
+      cd "$ROOT_DIR"
+      export "CARGO_TARGET_${target_env}_LINKER=$linker"
+      export "CC_${target_env,,}=$linker"
+      export "AR_${target_env,,}=$ar"
+      cargo install espflash --locked --target "$UPLOADER_TARGET" --root "$(dirname "$(dirname "$ESPFLASH_BINARY")")"
+    )
+  elif command -v nix >/dev/null 2>&1; then
+    (
+      cd "$ROOT_DIR"
+      nix develop "$ROOT_DIR" --command env \
+        "CARGO_TARGET_${target_env}_LINKER=$linker" \
+        "CC_${target_env,,}=$linker" \
+        "AR_${target_env,,}=$ar" \
+        cargo install espflash --locked --target "$UPLOADER_TARGET" --root "$(dirname "$(dirname "$ESPFLASH_BINARY")")"
+    )
+  else
+    echo "error: Required linker not found: ${linker}" >&2
+    echo "       Run this from the repo dev shell or install the target linker." >&2
+    exit 1
+  fi
+
+  if [ ! -x "$ESPFLASH_BINARY" ]; then
+    echo "error: Expected espflash binary was not produced: ${ESPFLASH_BINARY}" >&2
     exit 1
   fi
 }
@@ -195,6 +266,7 @@ install_remote() {
   local env_file="${LOCAL_TMP_DIR}/uploader.env"
   local service_file="${LOCAL_TMP_DIR}/${REMOTE_SERVICE_NAME}"
   local remote_env_dir="${REMOTE_ENV_FILE%/*}"
+  local remote_espflash_dir="${REMOTE_ESPFLASH_BINARY%/*}"
 
   require_command "$SSH_BIN"
   require_command "$SCP_BIN"
@@ -205,22 +277,27 @@ install_remote() {
   echo "==> Creating remote staging directory..."
   "$SSH_BIN" "$REMOTE" "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp'"
 
-  echo "==> Copying uploader, radar ELF, environment, and service files..."
+  echo "==> Copying uploader, radar ELF, espflash, environment, and service files..."
   "$SCP_BIN" \
     "$UPLOADER_BINARY" \
     "$RADAR_BINARY" \
+    "$ESPFLASH_BINARY" \
     "$env_file" \
     "$service_file" \
     "$REMOTE:$remote_tmp/"
 
-  echo "==> Installing systemd service on ${REMOTE}..."
+  echo "==> Installing runtime files and flashing radar firmware on ${REMOTE}..."
   "$SSH_BIN" "$REMOTE" "
     set -e
+    sudo systemctl stop '$REMOTE_SERVICE_NAME' 2>/dev/null || true
     sudo install -d -m 0755 '$REMOTE_APP_DIR'
     sudo install -d -m 0755 '$remote_env_dir'
     sudo install -d -m 0755 '$REMOTE_INFRACTIONS_DIR'
-    sudo install -m 0755 '$remote_tmp/uploader' '$REMOTE_APP_DIR/uploader'
+    sudo install -d -m 0755 '$remote_espflash_dir'
+    sudo install -m 0755 '$remote_tmp/$(basename "$ESPFLASH_BINARY")' '$REMOTE_ESPFLASH_BINARY'
     sudo install -m 0644 '$remote_tmp/$(basename "$RADAR_BINARY")' '$REMOTE_RADAR_BINARY'
+    sudo '$REMOTE_ESPFLASH_BINARY' flash --chip esp32s3 --port '$SERIAL_PORT' --non-interactive '$REMOTE_RADAR_BINARY'
+    sudo install -m 0755 '$remote_tmp/uploader' '$REMOTE_APP_DIR/uploader'
     sudo install -m 0600 '$remote_tmp/uploader.env' '$REMOTE_ENV_FILE'
     sudo install -m 0644 '$remote_tmp/$REMOTE_SERVICE_NAME' '/etc/systemd/system/$REMOTE_SERVICE_NAME'
     sudo systemctl daemon-reload
@@ -243,6 +320,7 @@ while [ "$#" -gt 0 ]; do
       require_option_value "$1" "${2:-}"
       UPLOADER_TARGET="$2"
       UPLOADER_BINARY="${ROOT_DIR}/uploader/target/${UPLOADER_TARGET}/release/uploader"
+      ESPFLASH_BINARY="${ROOT_DIR}/.nix/espflash/${UPLOADER_TARGET}/bin/espflash"
       shift
       ;;
     --serial-port)
@@ -319,6 +397,7 @@ fi
 LOCAL_TMP_DIR="$(mktemp -d)"
 
 build_uploader
+build_espflash
 ensure_radar_binary
 resolve_api_config
 install_remote
