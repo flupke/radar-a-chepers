@@ -167,6 +167,7 @@ fn target_data_payload(data: &TargetData) -> Value {
     serde_json::json!({
         "raw_speed_cm_s": data.raw_speed_cm_s,
         "speed": data.speed,
+        "suspicious_speed": data.suspicious_speed,
         "x": data.x,
         "y": data.y,
         "distance": data.distance,

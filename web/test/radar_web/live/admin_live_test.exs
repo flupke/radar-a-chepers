@@ -102,6 +102,7 @@ defmodule RadarWeb.AdminLiveTest do
         "in_range" => true,
         "in_aperture" => true,
         "over_speed" => false,
+        "suspicious_speed" => true,
         "cooldown_elapsed" => true,
         "capture_paused" => false,
         "capture_in_progress" => false,
@@ -115,6 +116,7 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("#last-target", "3 km/h")
     |> assert_has("#last-target", "83 cm/s")
     |> assert_has("#last-target", "Over speed")
+    |> assert_has("#last-target", "RD03-D sentinel")
   end
 
   test "persists radar configuration changes and restores canvas limits after reload", %{

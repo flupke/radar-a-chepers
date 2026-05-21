@@ -34,6 +34,7 @@ pub struct RadarConfig {
 pub struct TargetData {
     pub raw_speed_cm_s: i16,
     pub speed: i16,
+    pub suspicious_speed: bool,
     pub x: i16,
     pub y: i16,
     pub distance: f64,
@@ -260,7 +261,9 @@ impl InfractionRecorderInner {
             x,
             y,
         } = target;
-        let speed = raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s);
+        let raw_speed = raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s);
+        let suspicious_speed = is_suspicious_rd03d_speed(raw_speed_cm_s);
+        let speed = effective_speed_kmh(raw_speed, self.authorized_speed, suspicious_speed);
         let distance = ((x as f64).powi(2) + (y as f64).powi(2)).sqrt();
 
         let in_range = self.min_dist <= distance && distance <= self.max_dist;
@@ -280,6 +283,7 @@ impl InfractionRecorderInner {
         TargetData {
             raw_speed_cm_s,
             speed,
+            suspicious_speed,
             x,
             y,
             distance,
@@ -389,6 +393,22 @@ fn parse_raw_radar_message(rest: &str) -> Result<RawTarget> {
 
 fn raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s: i16) -> i16 {
     (f64::from(raw_speed_cm_s).abs() * 0.036).round() as i16
+}
+
+fn effective_speed_kmh(
+    raw_speed_kmh: i16,
+    authorized_speed_kmh: i16,
+    suspicious_speed: bool,
+) -> i16 {
+    if suspicious_speed {
+        raw_speed_kmh.max(authorized_speed_kmh.saturating_add(1))
+    } else {
+        raw_speed_kmh
+    }
+}
+
+fn is_suspicious_rd03d_speed(raw_speed_cm_s: i16) -> bool {
+    matches!(i32::from(raw_speed_cm_s).abs(), 248 | 256)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -529,6 +549,17 @@ mod tests {
         assert_eq!(raw_speed_cm_s_to_abs_kmh(2222), 80);
     }
 
+    #[test]
+    fn rd03d_suspicious_speed_is_an_overspeed_hint() {
+        assert!(is_suspicious_rd03d_speed(248));
+        assert!(is_suspicious_rd03d_speed(-248));
+        assert!(is_suspicious_rd03d_speed(256));
+        assert!(is_suspicious_rd03d_speed(-256));
+        assert!(!is_suspicious_rd03d_speed(247));
+        assert_eq!(effective_speed_kmh(9, 25, true), 26);
+        assert_eq!(effective_speed_kmh(9, 25, false), 9);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn target_messages_are_not_forwarded_as_uploader_logs() {
         let local = tokio::task::LocalSet::new();
@@ -633,6 +664,43 @@ mod tests {
                 assert_eq!(infractions.len(), 1);
                 assert_eq!(infractions[0].recorded_speed, 5);
                 assert_eq!(infractions[0].authorized_speed, 4);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rd03d_suspicious_speed_can_trigger_above_configured_limit() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(25);
+
+                recorder
+                    .update_target(raw_target(248, 0, 100), None)
+                    .unwrap();
+
+                let target_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(target_data.raw_speed_cm_s, 248);
+                assert_eq!(target_data.speed, 26);
+                assert!(target_data.suspicious_speed);
+                assert!(target_data.would_trigger);
+                assert!(!target_data.triggered);
+
+                recorder
+                    .record_trigger(raw_target(-256, 0, 100), None)
+                    .unwrap();
+
+                let trigger_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(trigger_data.raw_speed_cm_s, -256);
+                assert_eq!(trigger_data.speed, 26);
+                assert!(trigger_data.suspicious_speed);
+                assert!(trigger_data.triggered);
+
+                let infractions = saved_infractions(&photos_dir);
+                assert_eq!(infractions.len(), 1);
+                assert_eq!(infractions[0].recorded_speed, 26);
+                assert_eq!(infractions[0].authorized_speed, 25);
             })
             .await;
     }

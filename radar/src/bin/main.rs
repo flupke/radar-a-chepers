@@ -78,6 +78,65 @@ struct TriggerCheck {
     decision: TriggerDecision,
     speed_kmh: i16,
     authorized_speed_kmh: i16,
+    suspicious_speed: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RawFrameState {
+    Empty,
+    Targets,
+    SuspiciousSpeed,
+}
+
+impl RawFrameState {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::Targets => "targets",
+            Self::SuspiciousSpeed => "suspicious-speed",
+        }
+    }
+}
+
+struct RawFrameDiagnostics {
+    last_state: Option<RawFrameState>,
+    saw_targets: bool,
+}
+
+impl RawFrameDiagnostics {
+    fn new() -> Self {
+        Self {
+            last_state: None,
+            saw_targets: false,
+        }
+    }
+
+    fn observe(&mut self, targets: &TargetsList, frame: &[u8]) {
+        let state = raw_frame_state(targets);
+        let should_log = self.should_log(state);
+
+        if state != RawFrameState::Empty {
+            self.saw_targets = true;
+        }
+
+        if should_log {
+            log_raw_frame_diagnostic(state, targets, frame);
+        }
+
+        self.last_state = Some(state);
+    }
+
+    fn should_log(&self, state: RawFrameState) -> bool {
+        if self.last_state.is_none() {
+            return true;
+        }
+
+        if state == RawFrameState::Empty && !self.saw_targets {
+            return false;
+        }
+
+        self.last_state != Some(state)
+    }
 }
 
 const READ_BUF_SIZE: usize = 64;
@@ -460,6 +519,7 @@ async fn reader(
     let mut last_trigger_at: Option<Instant> = None;
     let mut last_check_log_at: Option<Instant> = None;
     let mut last_check_decision: Option<TriggerDecision> = None;
+    let mut raw_frame_diagnostics = RawFrameDiagnostics::new();
 
     loop {
         let result = with_timeout(
@@ -504,6 +564,8 @@ async fn reader(
 
                         match TargetsList::try_from(&rbuf[..TARGETS_LIST_LENGTH]) {
                             Ok(targets) => {
+                                raw_frame_diagnostics
+                                    .observe(&targets, &rbuf[..TARGETS_LIST_LENGTH]);
                                 defmt::debug!("Targets: {:#?}", targets);
                                 for target in targets.targets().iter().flatten() {
                                     let speed = target.speed.saturating_neg();
@@ -565,11 +627,15 @@ async fn trigger_check(
     last_trigger_at: Option<Instant>,
 ) -> TriggerCheck {
     let config = *trigger_config.lock().await;
-    let speed_kmh = raw_speed_cm_s_to_abs_kmh(target.speed);
+    let raw_speed_kmh = raw_speed_cm_s_to_abs_kmh(target.speed);
+    let suspicious_speed = is_suspicious_rd03d_speed(target.speed);
+    let speed_kmh =
+        effective_speed_kmh(raw_speed_kmh, config.authorized_speed_kmh, suspicious_speed);
     let mut check = TriggerCheck {
         decision: TriggerDecision::Trigger,
         speed_kmh,
         authorized_speed_kmh: config.authorized_speed_kmh,
+        suspicious_speed,
     };
 
     if config.capture_paused {
@@ -626,49 +692,55 @@ fn log_capture_check(check: &TriggerCheck, target: &Target) {
     match check.decision {
         TriggerDecision::Trigger => {
             defmt::info!(
-                "Capture check passed: speed={}km/h x={} y={}",
+                "Capture check passed: speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
+                check.suspicious_speed,
                 target.x,
                 target.y
             );
         }
         TriggerDecision::Paused => {
             defmt::info!(
-                "Capture check blocked: paused speed={}km/h x={} y={}",
+                "Capture check blocked: paused speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
+                check.suspicious_speed,
                 target.x,
                 target.y
             );
         }
         TriggerDecision::TooSlow => {
             defmt::info!(
-                "Capture check blocked: speed {}km/h <= limit {}km/h x={} y={}",
+                "Capture check blocked: speed {}km/h <= limit {}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
                 check.authorized_speed_kmh,
+                check.suspicious_speed,
                 target.x,
                 target.y
             );
         }
         TriggerDecision::OutOfRange => {
             defmt::info!(
-                "Capture check blocked: out of range speed={}km/h x={} y={}",
+                "Capture check blocked: out of range speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
+                check.suspicious_speed,
                 target.x,
                 target.y
             );
         }
         TriggerDecision::OutOfAperture => {
             defmt::info!(
-                "Capture check blocked: outside aperture speed={}km/h x={} y={}",
+                "Capture check blocked: outside aperture speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
+                check.suspicious_speed,
                 target.x,
                 target.y
             );
         }
         TriggerDecision::Cooldown => {
             defmt::info!(
-                "Capture check blocked: cooldown speed={}km/h x={} y={}",
+                "Capture check blocked: cooldown speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
+                check.suspicious_speed,
                 target.x,
                 target.y
             );
@@ -678,6 +750,66 @@ fn log_capture_check(check: &TriggerCheck, target: &Target) {
 
 fn raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s: i16) -> i16 {
     ((i32::from(raw_speed_cm_s).abs() * 36 + 500) / 1000) as i16
+}
+
+fn effective_speed_kmh(
+    raw_speed_kmh: i16,
+    authorized_speed_kmh: i16,
+    suspicious_speed: bool,
+) -> i16 {
+    if suspicious_speed {
+        raw_speed_kmh.max(authorized_speed_kmh.saturating_add(1))
+    } else {
+        raw_speed_kmh
+    }
+}
+
+fn raw_frame_state(targets: &TargetsList) -> RawFrameState {
+    let mut has_targets = false;
+
+    for target in targets.targets().iter().flatten() {
+        has_targets = true;
+        if is_suspicious_rd03d_speed(target.speed) {
+            return RawFrameState::SuspiciousSpeed;
+        }
+    }
+
+    if has_targets {
+        RawFrameState::Targets
+    } else {
+        RawFrameState::Empty
+    }
+}
+
+fn is_suspicious_rd03d_speed(raw_speed_cm_s: i16) -> bool {
+    matches!(i32::from(raw_speed_cm_s).abs(), 248 | 256)
+}
+
+fn log_raw_frame_diagnostic(state: RawFrameState, targets: &TargetsList, frame: &[u8]) {
+    defmt::info!(
+        "Radar raw frame diagnostic: state={} targets={} bytes={:#X}",
+        state.label(),
+        target_count(targets),
+        frame
+    );
+
+    for target in targets.targets().iter().flatten() {
+        defmt::info!(
+            "Radar raw target: speed={}cm/s x={} y={} res={}",
+            target.speed.saturating_neg(),
+            target.x,
+            target.y,
+            target.distance_resolution
+        );
+    }
+}
+
+fn target_count(targets: &TargetsList) -> usize {
+    targets
+        .targets()
+        .iter()
+        .filter(|target| target.is_some())
+        .count()
 }
 
 async fn pulse_trigger(trigger: &mut Output<'static>) {

@@ -114,3 +114,22 @@ Expected:
 USB to the camera is for `gphoto2` control/photo retrieval only. The camera still needs battery power or a dummy-battery power adapter.
 
 When the camera battery is dead, continue radar-only debugging by pausing capture in the admin UI. Radar positions, uploader connection, ESP config ack, and capture-check logs can still be tested without taking photos.
+
+## RD03-D Raw Frame Test
+
+Use this when tracking disappears while someone runs through the radar field. Deploy the firmware, then follow the uploader logs while reproducing the dropout:
+
+```sh
+./install.sh
+ssh rshep.local 'journalctl -u radar-uploader.service -f --output=cat' | rg --line-buffered 'Radar raw frame|Radar raw target|Capture check|EVENTS: TRIGGER'
+```
+
+The ESP logs raw 30-byte RD03-D frames only around useful transitions:
+
+- `state=empty`: a valid RD03-D frame was received, but all target slots were empty after at least one target had been seen.
+- `state=targets`: targets reappeared after an empty or suspicious frame.
+- `state=suspicious-speed`: a target speed was one of the suspicious `248`/`256` cm/s sentinel-like values seen in other RD03-D integrations.
+
+If running produces `state=empty` or `state=suspicious-speed` while the ESP is still receiving valid raw frames, the dropout is inside the RD03-D module/tracker rather than the web display or uploader pipeline.
+
+For field tests with fast people, use the full practical RD03-D range before blaming the trigger filters. The current useful starting point is `max_dist=8000` mm; shorter limits can reject the long-range jumps the module reports when its tracker starts to fail.

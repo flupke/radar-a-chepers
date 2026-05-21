@@ -151,7 +151,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
                     const now = performance.now();
                     const w = canvas.width;
                     const h = canvas.height;
-                    const viewRange = Math.max(cfg?.max_dist || 8000, 8000);
+                    const viewRange = Math.max(cfg?.max_dist || 12000, 12000);
                     const scale = h / viewRange;
 
                     while (dots.length > 0 && now - dots[0].time > FADE_MS) dots.shift();
@@ -203,7 +203,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
                         ? Math.min(dot.speed / (cfg.authorized_speed * 2), 1)
                         : 0.5;
                       const hue = 120 * (1 - ratio);
-                      const radius = dot.triggered ? 8 : 7;
+                      const radius = dot.triggered || dot.suspicious_speed ? 8 : 7;
 
                       ctx.beginPath();
                       ctx.arc(px, py, radius, 0, Math.PI * 2);
@@ -217,10 +217,12 @@ defmodule RadarWeb.AdminRadarConfigLive do
                         : `hsla(205, 90%, 90%, ${Math.max(opacity * 0.75, 0.25)})`;
                       ctx.stroke();
 
-                      if (dot.triggered) {
+                      if (dot.triggered || dot.suspicious_speed) {
                         ctx.beginPath();
                         ctx.arc(px, py, 14, 0, Math.PI * 2);
-                        ctx.strokeStyle = `hsla(${hue}, 90%, 55%, ${opacity})`;
+                        ctx.strokeStyle = dot.suspicious_speed
+                          ? `hsla(290, 90%, 70%, ${opacity})`
+                          : `hsla(${hue}, 90%, 55%, ${opacity})`;
                         ctx.lineWidth = 2;
                         ctx.stroke();
                       }
@@ -261,6 +263,10 @@ defmodule RadarWeb.AdminRadarConfigLive do
                   <span class="opacity-70">Over speed</span>
                   <span class={debug_bool_class(@last_target.over_speed)}>
                     {yes_no(@last_target.over_speed)}
+                  </span>
+                  <span class="opacity-70">RD03-D sentinel</span>
+                  <span class={debug_bool_class(!@last_target.suspicious_speed)}>
+                    {yes_no(@last_target.suspicious_speed)}
                   </span>
                   <span class="opacity-70">Cooldown</span>
                   <span class={debug_bool_class(@last_target.cooldown_elapsed)}>
@@ -430,7 +436,10 @@ defmodule RadarWeb.AdminRadarConfigLive do
     {:noreply,
      socket
      |> assign(:last_target, target)
-     |> push_event("radar_point", Map.take(target, [:x, :y, :speed, :distance, :triggered]))}
+     |> push_event(
+       "radar_point",
+       Map.take(target, [:x, :y, :speed, :distance, :triggered, :suspicious_speed])
+     )}
   end
 
   defp legacy_infractions_path(params) do
@@ -527,6 +536,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
     %{
       raw_speed_cm_s: target_number(data, "raw_speed_cm_s", 0),
       speed: target_number(data, "speed", 0),
+      suspicious_speed: target_bool(data, "suspicious_speed"),
       x: target_number(data, "x", 0),
       y: target_number(data, "y", 0),
       distance: target_number(data, "distance", 0.0),
