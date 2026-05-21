@@ -1,6 +1,5 @@
 use camino::Utf8PathBuf;
 use clap::Parser;
-use env_logger::Env;
 use eyre::{Result, WrapErr, eyre};
 use tokio::sync::broadcast;
 
@@ -11,6 +10,7 @@ use uploader::{
     infraction_recorder::{InfractionRecorder, InfractionRecorderCommand},
     infraction_uploader::InfractionUploader,
     radar_reader::RadarReader,
+    uploader_logger,
 };
 
 #[derive(Parser, Debug)]
@@ -65,12 +65,12 @@ impl Args {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    env_logger::init_from_env(Env::default().default_filter_or("info"));
-
     let args = Args::parse();
     args.check()?;
 
     let (target_data_tx, target_data_rx) = broadcast::channel(64);
+    let (uploader_log_tx, uploader_log_rx) = broadcast::channel(256);
+    uploader_logger::init(uploader_log_tx.clone());
 
     // Bridge channel: config_channel (Send) -> LocalSet actor (!Send)
     let (config_tx, mut config_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -85,6 +85,7 @@ async fn main() -> Result<()> {
         api_key,
         config_tx,
         target_data_rx,
+        uploader_log_rx,
     ));
 
     let local = tokio::task::LocalSet::new();
@@ -100,6 +101,7 @@ async fn main() -> Result<()> {
                 args.infractions_dir,
                 &infraction_uploader,
                 target_data_tx,
+                uploader_log_tx,
                 test_mode,
             );
             let recorder_port = infraction_recorder.port().clone();

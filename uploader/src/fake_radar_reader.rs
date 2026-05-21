@@ -94,7 +94,6 @@ impl Actor for FakeRadarReader {
                     target.x as i16,
                     target.y as i16,
                 );
-                log::debug!("Fake radar: {message}");
                 self.infraction_recorder.process_log_message(message).await;
                 target.step(dt, &mut rng);
                 sleep(Duration::from_millis(TICK_MS)).await;

@@ -7,7 +7,10 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::{
     actor::{Actor, ActorPort},
     infraction_uploader::{InfractionUploader, InfractionUploaderCommand},
+    uploader_logger::UploaderLog,
 };
+
+const TARGET_PREFIX: &str = "EVENTS: TARGET: ";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RadarConfig {
@@ -30,6 +33,7 @@ pub struct TargetData {
 
 pub struct InfractionRecorder {
     port: ActorPort<InfractionRecorderCommand>,
+    uploader_log_tx: broadcast::Sender<UploaderLog>,
 }
 
 impl InfractionRecorder {
@@ -38,6 +42,7 @@ impl InfractionRecorder {
         photos_dir: Utf8PathBuf,
         infraction_uploader: &InfractionUploader,
         target_data_tx: broadcast::Sender<TargetData>,
+        uploader_log_tx: broadcast::Sender<UploaderLog>,
         test_mode: bool,
     ) -> Self {
         Self {
@@ -49,6 +54,7 @@ impl InfractionRecorder {
                 test_mode,
             )
             .start(),
+            uploader_log_tx,
         }
     }
 
@@ -57,6 +63,12 @@ impl InfractionRecorder {
     }
 
     pub(crate) async fn process_log_message(&self, message: String) {
+        if !is_target_message(&message) {
+            let _ = self
+                .uploader_log_tx
+                .send(UploaderLog::info(message.clone()));
+        }
+
         let (sender, receiver) = oneshot::channel();
         self.port
             .send(InfractionRecorderCommand::ProcessLogMessage(
@@ -125,8 +137,6 @@ impl Actor for InfractionRecorderInner {
 }
 
 impl InfractionRecorderInner {
-    const TARGET_PREFIX: &str = "EVENTS: TARGET: ";
-
     fn new(
         authorized_speed: i16,
         photos_dir: Utf8PathBuf,
@@ -150,10 +160,10 @@ impl InfractionRecorderInner {
     }
 
     fn update(&mut self, message: String) -> Result<()> {
-        if !message.starts_with(Self::TARGET_PREFIX) {
+        if !is_target_message(&message) {
             return Ok(());
         }
-        let rest = message.strip_prefix(Self::TARGET_PREFIX).unwrap();
+        let rest = message.strip_prefix(TARGET_PREFIX).unwrap();
         let parts: Vec<&str> = rest.split_whitespace().collect();
         if parts.len() != 3 {
             return Ok(());
@@ -270,6 +280,10 @@ impl InfractionRecorderInner {
     }
 }
 
+fn is_target_message(message: &str) -> bool {
+    message.starts_with(TARGET_PREFIX)
+}
+
 fn raw_speed_cm_s_to_kmh(raw_speed_cm_s: i16) -> i16 {
     (f64::from(raw_speed_cm_s) * 0.036).round() as i16
 }
@@ -347,6 +361,35 @@ mod tests {
         (temp_dir, photos_dir, recorder, target_data_rx)
     }
 
+    fn test_infraction_recorder(
+        authorized_speed: i16,
+    ) -> (
+        tempfile::TempDir,
+        InfractionRecorder,
+        broadcast::Receiver<TargetData>,
+        broadcast::Receiver<UploaderLog>,
+    ) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let photos_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
+        let (target_data_tx, target_data_rx) = broadcast::channel(8);
+        let (uploader_log_tx, uploader_log_rx) = broadcast::channel(8);
+        let uploader = InfractionUploader::new(
+            photos_dir.clone(),
+            "http://localhost".to_string(),
+            "api-key".to_string(),
+        );
+        let recorder = InfractionRecorder::new(
+            authorized_speed,
+            photos_dir,
+            &uploader,
+            target_data_tx,
+            uploader_log_tx,
+            true,
+        );
+
+        (temp_dir, recorder, target_data_rx, uploader_log_rx)
+    }
+
     fn saved_infractions(photos_dir: &Utf8Path) -> Vec<Infraction> {
         std::fs::read_dir(photos_dir)
             .unwrap()
@@ -364,6 +407,54 @@ mod tests {
         assert_eq!(raw_speed_cm_s_to_kmh(0), 0);
         assert_eq!(raw_speed_cm_s_to_kmh(150), 5);
         assert_eq!(raw_speed_cm_s_to_kmh(2222), 80);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn target_messages_are_not_forwarded_as_uploader_logs() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, recorder, mut target_data_rx, mut uploader_log_rx) =
+                    test_infraction_recorder(100);
+
+                recorder
+                    .process_log_message("EVENTS: TARGET: 150 0 100".to_string())
+                    .await;
+
+                let target_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(target_data.speed, 5);
+                assert!(matches!(
+                    uploader_log_rx.try_recv(),
+                    Err(broadcast::error::TryRecvError::Empty)
+                ));
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn non_target_messages_are_forwarded_as_uploader_logs() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, recorder, mut target_data_rx, mut uploader_log_rx) =
+                    test_infraction_recorder(100);
+
+                recorder
+                    .process_log_message("camera disconnected".to_string())
+                    .await;
+
+                assert_eq!(
+                    uploader_log_rx.try_recv().unwrap(),
+                    UploaderLog::info("camera disconnected")
+                );
+                assert!(matches!(
+                    target_data_rx.try_recv(),
+                    Err(broadcast::error::TryRecvError::Empty)
+                ));
+            })
+            .await;
     }
 
     #[tokio::test(flavor = "current_thread")]

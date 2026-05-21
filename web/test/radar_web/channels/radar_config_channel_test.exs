@@ -4,6 +4,8 @@ defmodule RadarWeb.RadarConfigChannelTest do
   alias Radar.RadarConfigs
   alias RadarWeb.RadarConfigChannel
 
+  @uploader_debug_topic "uploader_debug"
+
   test "get_config replies with capture pause state for uploader clients" do
     assert {:ok, _reply, socket} =
              Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
@@ -35,5 +37,48 @@ defmodule RadarWeb.RadarConfigChannelTest do
     push(socket, "target_data", %{"x" => 1, "y" => 2})
 
     assert_receive {:target_data, %{"x" => 1, "y" => 2}}
+  end
+
+  test "tracks uploader channel joins" do
+    Phoenix.PubSub.subscribe(Radar.PubSub, @uploader_debug_topic)
+
+    assert {:ok, _reply, _socket} =
+             Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
+             |> subscribe_and_join(RadarConfigChannel, "radar:config")
+
+    assert_receive {:uploader_connected, true}
+  end
+
+  test "accepts live uploader logs" do
+    Phoenix.PubSub.subscribe(Radar.PubSub, @uploader_debug_topic)
+
+    assert {:ok, _reply, socket} =
+             Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
+             |> subscribe_and_join(RadarConfigChannel, "radar:config")
+
+    assert_receive {:uploader_connected, true}
+
+    push(socket, "uploader_log", %{"message" => "radar booted", "level" => "debug"})
+
+    assert_receive {:uploader_log, log}
+    assert log.message == "radar booted"
+    assert log.level == "debug"
+  end
+
+  test "ignores target frames submitted as uploader logs" do
+    Phoenix.PubSub.subscribe(Radar.PubSub, @uploader_debug_topic)
+
+    assert {:ok, _reply, socket} =
+             Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
+             |> subscribe_and_join(RadarConfigChannel, "radar:config")
+
+    assert_receive {:uploader_connected, true}
+
+    push(socket, "uploader_log", %{
+      "message" => "EVENTS: TARGET: 150 0 100",
+      "level" => "info"
+    })
+
+    refute_receive {:uploader_log, _log}
   end
 end

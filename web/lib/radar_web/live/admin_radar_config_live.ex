@@ -7,12 +7,15 @@ defmodule RadarWeb.AdminRadarConfigLive do
   alias Phoenix.LiveView.ColocatedHook
 
   @throttle_ms 100
+  @max_uploader_logs 100
+  @uploader_debug_topic "uploader_debug"
 
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Radar.PubSub, "radar_config")
       Phoenix.PubSub.subscribe(Radar.PubSub, "radar_data")
       Phoenix.PubSub.subscribe(Radar.PubSub, "infractions")
+      Phoenix.PubSub.subscribe(Radar.PubSub, @uploader_debug_topic)
     end
 
     config = RadarConfigs.get_config!()
@@ -22,6 +25,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
       |> assign(:config, config)
       |> assign(:form, config_to_form(config))
       |> assign(:infraction_count, Infractions.count_infractions())
+      |> assign(:uploader_debug, %{connected: false, logs: []})
       |> assign(:last_ui_update, System.monotonic_time(:millisecond) - @throttle_ms)
       |> push_config_event(config)
 
@@ -219,6 +223,58 @@ defmodule RadarWeb.AdminRadarConfigLive do
             </script>
           </div>
         </div>
+
+        <div class="card bg-base-200 shadow-lg">
+          <div class="card-body gap-4">
+            <div class="flex items-center justify-between gap-4">
+              <h2 class="card-title">Uploader Debug</h2>
+              <div id="uploader-connected" class="flex items-center gap-2 text-sm">
+                <span class="opacity-70">Uploader connected</span>
+                <span class={uploader_status_class(@uploader_debug.connected)}>
+                  {yes_no(@uploader_debug.connected)}
+                </span>
+              </div>
+            </div>
+
+            <div
+              id="uploader-logs"
+              phx-hook=".UploaderLogs"
+              data-last-log-id={last_log_id(@uploader_debug.logs)}
+              class="max-h-72 overflow-y-auto rounded-lg bg-base-300 p-3 font-mono text-xs leading-relaxed"
+            >
+              <p :if={@uploader_debug.logs == []} class="opacity-70">No uploader logs yet.</p>
+              <div
+                :for={log <- @uploader_debug.logs}
+                id={"uploader-log-#{log.id}"}
+                class="grid grid-cols-[4.5rem_4.5rem_1fr] gap-2 border-b border-base-content/10 py-1 last:border-b-0"
+              >
+                <span class="opacity-60">{format_log_time(log.at)}</span>
+                <span class="opacity-70">{format_log_level(log.level)}</span>
+                <span class="break-words">{log.message}</span>
+              </div>
+            </div>
+            <script :type={ColocatedHook} name=".UploaderLogs">
+              export default {
+                mounted() {
+                  this.lastLogId = this.el.dataset.lastLogId;
+                  this.scrollToBottom();
+                },
+                updated() {
+                  const nextLogId = this.el.dataset.lastLogId;
+                  if (nextLogId !== this.lastLogId) {
+                    this.lastLogId = nextLogId;
+                    this.scrollToBottom();
+                  }
+                },
+                scrollToBottom() {
+                  requestAnimationFrame(() => {
+                    this.el.scrollTop = this.el.scrollHeight;
+                  });
+                }
+              }
+            </script>
+          </div>
+        </div>
       </div>
     </.admin_shell>
     """
@@ -266,8 +322,17 @@ defmodule RadarWeb.AdminRadarConfigLive do
     {:noreply, assign(socket, :infraction_count, Infractions.count_infractions())}
   end
 
+  def handle_info({:uploader_connected, connected}, socket) do
+    {:noreply, update(socket, :uploader_debug, &%{&1 | connected: connected})}
+  end
+
+  def handle_info({:uploader_log, log}, socket) do
+    {:noreply, update(socket, :uploader_debug, &append_uploader_log(&1, log))}
+  end
+
   def handle_info({:target_data, data}, socket) do
     now = System.monotonic_time(:millisecond)
+    socket = update(socket, :uploader_debug, &%{&1 | connected: true})
 
     if now - socket.assigns.last_ui_update >= @throttle_ms do
       {:noreply,
@@ -343,6 +408,48 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   defp capture_button_class(_config) do
     "btn btn-warning shrink-0"
+  end
+
+  defp yes_no(true), do: "Yes"
+  defp yes_no(false), do: "No"
+
+  defp uploader_status_class(true), do: "badge badge-success"
+  defp uploader_status_class(false), do: "badge badge-error"
+
+  defp format_log_time(%DateTime{} = at), do: Calendar.strftime(at, "%H:%M:%S")
+  defp format_log_time(_at), do: "--:--:--"
+
+  defp format_log_level(level) when is_binary(level), do: String.upcase(level)
+  defp format_log_level(level), do: level |> inspect() |> String.upcase()
+
+  defp last_log_id([]), do: ""
+  defp last_log_id(logs), do: logs |> List.last() |> Map.fetch!(:id)
+
+  defp append_uploader_log(debug, log) do
+    logs =
+      debug.logs
+      |> Kernel.++([normalize_uploader_log(log)])
+      |> Enum.take(-@max_uploader_logs)
+
+    %{debug | connected: true, logs: logs}
+  end
+
+  defp normalize_uploader_log(log) when is_map(log) do
+    %{
+      id: Map.get(log, :id, System.unique_integer([:positive])),
+      at: Map.get(log, :at, DateTime.utc_now() |> DateTime.truncate(:second)),
+      level: Map.get(log, :level, "info"),
+      message: Map.get(log, :message, inspect(log))
+    }
+  end
+
+  defp normalize_uploader_log(log) do
+    %{
+      id: System.unique_integer([:positive]),
+      at: DateTime.utc_now() |> DateTime.truncate(:second),
+      level: "info",
+      message: inspect(log)
+    }
   end
 
   attr :field, Phoenix.HTML.FormField, required: true

@@ -4,8 +4,9 @@ defmodule RadarWeb.AdminLiveTest do
   import Radar.InfractionsFixtures
   import Radar.PhotosFixtures
 
-  alias Radar.Repo
-  alias Radar.RadarConfigs
+  alias Radar.{RadarConfigs, Repo}
+
+  @uploader_debug_topic "uploader_debug"
 
   setup do
     Repo.delete_all(Radar.Infraction)
@@ -22,7 +23,70 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("a[href='/admin/infractions']", "Infractions")
     |> assert_has("h2", "Trigger Parameters")
     |> assert_has("h2", "Live Radar Data")
+    |> assert_has("h2", "Uploader Debug")
+    |> assert_has("#uploader-connected", "No")
     |> assert_has("#radar-canvas")
+  end
+
+  test "shows uploader connection state and live logs", %{conn: conn} do
+    session =
+      conn
+      |> log_in_admin()
+      |> visit(~p"/admin")
+      |> assert_has("#uploader-connected", "No")
+      |> assert_has("#uploader-logs", "No uploader logs yet.")
+
+    Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {:uploader_connected, true})
+
+    session
+    |> assert_has("#uploader-connected", "Yes")
+
+    Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {
+      :uploader_log,
+      %{id: 1, at: ~U[2026-05-21 09:00:00Z], level: "debug", message: "radar booted"}
+    })
+
+    session
+    |> assert_has("#uploader-logs", "radar booted")
+    |> assert_has("#uploader-logs", "DEBUG")
+
+    Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {:uploader_connected, false})
+
+    session
+    |> assert_has("#uploader-connected", "No")
+  end
+
+  test "marks uploader connected when logs arrive", %{conn: conn} do
+    session =
+      conn
+      |> log_in_admin()
+      |> visit(~p"/admin")
+      |> assert_has("#uploader-connected", "No")
+
+    Phoenix.PubSub.broadcast(Radar.PubSub, @uploader_debug_topic, {
+      :uploader_log,
+      %{id: 1, at: ~U[2026-05-21 09:00:00Z], level: "info", message: "radar tick"}
+    })
+
+    session
+    |> assert_has("#uploader-connected", "Yes")
+    |> assert_has("#uploader-logs", "radar tick")
+  end
+
+  test "marks uploader connected when target data arrives", %{conn: conn} do
+    session =
+      conn
+      |> log_in_admin()
+      |> visit(~p"/admin")
+      |> assert_has("#uploader-connected", "No")
+
+    Phoenix.PubSub.broadcast(Radar.PubSub, "radar_data", {
+      :target_data,
+      %{"x" => 1, "y" => 2, "speed" => 3, "distance" => 4, "triggered" => false}
+    })
+
+    session
+    |> assert_has("#uploader-connected", "Yes")
   end
 
   test "persists radar configuration changes and restores canvas limits after reload", %{

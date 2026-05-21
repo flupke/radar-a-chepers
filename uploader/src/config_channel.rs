@@ -4,16 +4,28 @@ use std::time::Duration;
 use phoenix_channels_client::{Client, Config, Payload};
 use tokio::sync::broadcast;
 
-use crate::infraction_recorder::{RadarConfig, TargetData};
+use crate::{
+    infraction_recorder::{RadarConfig, TargetData},
+    uploader_logger::UploaderLog,
+};
 
 pub async fn run(
     api_endpoint: String,
     api_key: String,
     config_tx: tokio::sync::mpsc::UnboundedSender<RadarConfig>,
     mut target_data_rx: broadcast::Receiver<TargetData>,
+    mut uploader_log_rx: broadcast::Receiver<UploaderLog>,
 ) {
     loop {
-        match connect_and_run(&api_endpoint, &api_key, &config_tx, &mut target_data_rx).await {
+        match connect_and_run(
+            &api_endpoint,
+            &api_key,
+            &config_tx,
+            &mut target_data_rx,
+            &mut uploader_log_rx,
+        )
+        .await
+        {
             Ok(()) => log::info!("Config channel closed, reconnecting..."),
             Err(e) => log::error!("Config channel error: {e}, reconnecting..."),
         }
@@ -26,6 +38,7 @@ async fn connect_and_run(
     api_key: &str,
     config_tx: &tokio::sync::mpsc::UnboundedSender<RadarConfig>,
     target_data_rx: &mut broadcast::Receiver<TargetData>,
+    uploader_log_rx: &mut broadcast::Receiver<UploaderLog>,
 ) -> eyre::Result<()> {
     let ws_endpoint = api_endpoint
         .replace("https://", "wss://")
@@ -77,26 +90,46 @@ async fn connect_and_run(
     let throttle_interval = Duration::from_millis(200);
 
     loop {
-        match target_data_rx.recv().await {
-            Ok(data) => {
-                let now = tokio::time::Instant::now();
-                if now.duration_since(last_target_send) >= throttle_interval {
-                    let payload = serde_json::json!({
-                        "speed": data.speed,
-                        "x": data.x,
-                        "y": data.y,
-                        "distance": data.distance,
-                        "triggered": data.triggered,
-                    });
-                    if let Err(e) = channel.send_noreply("target_data", payload).await {
-                        log::error!("Failed to send target data: {e}");
-                        break;
+        tokio::select! {
+            target_data = target_data_rx.recv() => {
+                match target_data {
+                    Ok(data) => {
+                        let now = tokio::time::Instant::now();
+                        if now.duration_since(last_target_send) >= throttle_interval {
+                            let payload = serde_json::json!({
+                                "speed": data.speed,
+                                "x": data.x,
+                                "y": data.y,
+                                "distance": data.distance,
+                                "triggered": data.triggered,
+                            });
+                            if let Err(e) = channel.send_noreply("target_data", payload).await {
+                                log::error!("Failed to send target data: {e}");
+                                break;
+                            }
+                            last_target_send = now;
+                        }
                     }
-                    last_target_send = now;
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
-            }
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => break,
+            },
+            uploader_log = uploader_log_rx.recv() => {
+                match uploader_log {
+                    Ok(log) => {
+                        let payload = serde_json::json!({
+                            "level": log.level,
+                            "message": log.message,
+                        });
+                        if let Err(e) = channel.send_noreply("uploader_log", payload).await {
+                            log::error!("Failed to send uploader log: {e}");
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            },
         }
     }
 

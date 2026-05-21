@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use camino::Utf8PathBuf;
 use defmt_decoder::{DecodeError, Table};
+use tokio::io::AsyncReadExt;
 use tokio::time::sleep;
+use tokio_serial::{SerialPort, SerialPortBuilderExt};
 
 use crate::{actor::Actor, infraction_recorder::InfractionRecorder};
 
@@ -46,7 +48,7 @@ impl Actor for RadarReader {
             .stop_bits(tokio_serial::StopBits::One)
             .flow_control(tokio_serial::FlowControl::None)
             .timeout(Duration::from_millis(50))
-            .open()
+            .open_native_async()
             .unwrap();
 
         let _ = port.clear(tokio_serial::ClearBuffer::All);
@@ -55,9 +57,10 @@ impl Actor for RadarReader {
         log::info!("Listening for logs on {}...", self.serial_port);
 
         loop {
-            match port.read(&mut buffer) {
+            match port.read(&mut buffer).await {
                 Ok(num_bytes) => {
                     if num_bytes == 0 {
+                        tokio::task::yield_now().await;
                         continue;
                     }
 
@@ -94,7 +97,14 @@ impl Actor for RadarReader {
                         }
                     }
                 }
-                Err(ref error) if error.kind() == std::io::ErrorKind::TimedOut => (),
+                Err(ref error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) =>
+                {
+                    tokio::task::yield_now().await;
+                }
                 Err(error) => {
                     log::error!("Failed to read from serial port: {error}");
                     break;
