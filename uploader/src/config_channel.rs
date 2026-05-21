@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use phoenix_channels_client::{Client, Config, Payload};
+use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::time::{self, Instant};
 
@@ -90,6 +91,14 @@ async fn connect_and_run(
     let mut ping = time::interval_at(Instant::now() + ping_interval, ping_interval);
     ping.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
+    let target_flush_interval = Duration::from_millis(100);
+    let mut target_flush = time::interval_at(
+        Instant::now() + target_flush_interval,
+        target_flush_interval,
+    );
+    target_flush.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    let mut latest_target_data = None;
+
     loop {
         tokio::select! {
             _ = ping.tick() => {
@@ -105,27 +114,27 @@ async fn connect_and_run(
                     break;
                 }
             },
+            _ = target_flush.tick() => {
+                if let Some(data) = latest_target_data.take() {
+                    let payload = target_data_payload(&data);
+                    if let Err(e) = channel.send_noreply("target_data", payload).await {
+                        log::error!("Failed to send target data: {e}");
+                        break;
+                    }
+                }
+            },
             target_data = target_data_rx.recv() => {
                 match target_data {
                     Ok(data) => {
-                        let payload = serde_json::json!({
-                            "raw_speed_cm_s": data.raw_speed_cm_s,
-                            "speed": data.speed,
-                            "x": data.x,
-                            "y": data.y,
-                            "distance": data.distance,
-                            "angle": data.angle,
-                            "in_range": data.in_range,
-                            "in_aperture": data.in_aperture,
-                            "over_speed": data.over_speed,
-                            "cooldown_elapsed": data.cooldown_elapsed,
-                            "capture_paused": data.capture_paused,
-                            "would_trigger": data.would_trigger,
-                            "triggered": data.triggered,
-                        });
-                        if let Err(e) = channel.send_noreply("target_data", payload).await {
-                            log::error!("Failed to send target data: {e}");
-                            break;
+                        if data.triggered {
+                            latest_target_data = None;
+                            let payload = target_data_payload(&data);
+                            if let Err(e) = channel.send_noreply("target_data", payload).await {
+                                log::error!("Failed to send target data: {e}");
+                                break;
+                            }
+                        } else {
+                            latest_target_data = Some(data);
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -152,6 +161,25 @@ async fn connect_and_run(
     }
 
     Ok(())
+}
+
+fn target_data_payload(data: &TargetData) -> Value {
+    serde_json::json!({
+        "raw_speed_cm_s": data.raw_speed_cm_s,
+        "speed": data.speed,
+        "x": data.x,
+        "y": data.y,
+        "distance": data.distance,
+        "angle": data.angle,
+        "in_range": data.in_range,
+        "in_aperture": data.in_aperture,
+        "over_speed": data.over_speed,
+        "cooldown_elapsed": data.cooldown_elapsed,
+        "capture_paused": data.capture_paused,
+        "capture_in_progress": data.capture_in_progress,
+        "would_trigger": data.would_trigger,
+        "triggered": data.triggered,
+    })
 }
 
 fn parse_config_payload(payload: &Payload) -> Option<RadarConfig> {

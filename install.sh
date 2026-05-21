@@ -14,9 +14,11 @@ UPLOADER_BINARY="${ROOT_DIR}/uploader/target/${UPLOADER_TARGET}/release/uploader
 ESPFLASH_BINARY="${ROOT_DIR}/.nix/espflash/${UPLOADER_TARGET}/bin/espflash"
 
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
+CONFIG_SERIAL_PORT="${CONFIG_SERIAL_PORT:-/dev/serial0}"
 RADAR_BINARY="${RADAR_BINARY:-${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers}"
 
-REMOTE="${REMOTE:-}"
+REMOTE="${REMOTE:-rshep.local}"
+REMOTE_FROM_CLI=0
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/radar-a-chepers}"
 REMOTE_ENV_FILE="${REMOTE_ENV_FILE:-${REMOTE_APP_DIR}/.env}"
 REMOTE_INFRACTIONS_DIR="${REMOTE_INFRACTIONS_DIR:-/var/lib/radar-a-chepers/infractions}"
@@ -42,15 +44,17 @@ require_option_value() {
 
 usage() {
   cat <<EOF
-Usage: ./install.sh [options] <ssh-host>
+Usage: ./install.sh [options] [ssh-host]
 
 Builds the uploader for Raspberry Pi 4, fetches RADAR_API_KEY from Fly.io,
 copies the runtime files over SSH, and installs a systemd service.
 
 Options:
-  --host HOST                 SSH target, for example pi@raspberrypi.local.
+  --host HOST                 SSH target. Default: ${REMOTE}
   --target TARGET             Rust target. Default: ${UPLOADER_TARGET}
-  --serial-port PATH          Serial device on the Raspberry Pi. Default: ${SERIAL_PORT}
+  --serial-port PATH          ESP USB serial device for flashing/logs. Default: ${SERIAL_PORT}
+  --config-serial-port PATH   Pi UART device used to send config to ESP.
+                              Default: ${CONFIG_SERIAL_PORT}
   --radar-binary PATH         Local radar firmware ELF to copy.
                               Default: ${RADAR_BINARY}
   --remote-app-dir PATH       Remote install directory. Default: ${REMOTE_APP_DIR}
@@ -195,18 +199,8 @@ build_espflash() {
 }
 
 ensure_radar_binary() {
-  local newer_source
-
-  if [ ! -f "$RADAR_BINARY" ]; then
-    newer_source=1
-  else
-    newer_source="$(find "$ROOT_DIR/radar" -name '*.rs' -newer "$RADAR_BINARY" -print -quit)"
-  fi
-
-  if [ -n "$newer_source" ]; then
-    echo "==> Building radar firmware ELF..."
-    run_cargo "$ROOT_DIR/radar" build
-  fi
+  echo "==> Building radar firmware ELF..."
+  run_cargo "$ROOT_DIR/radar" build
 
   if [ ! -f "$RADAR_BINARY" ]; then
     echo "error: Expected radar firmware ELF was not produced: ${RADAR_BINARY}" >&2
@@ -235,6 +229,7 @@ write_env_file() {
     printf 'API_KEY=%s\n' "$API_KEY"
     printf 'INFRACTIONS_DIR=%s\n' "$REMOTE_INFRACTIONS_DIR"
     printf 'SERIAL_PORT=%s\n' "$SERIAL_PORT"
+    printf 'CONFIG_SERIAL_PORT=%s\n' "$CONFIG_SERIAL_PORT"
     printf 'ELF_PATH=%s\n' "$REMOTE_RADAR_BINARY"
     printf 'RUST_LOG=%s\n' "$RUST_LOG"
   } >"$env_file"
@@ -252,7 +247,7 @@ After=network-online.target
 [Service]
 Environment=RUST_LOG=${RUST_LOG}
 WorkingDirectory=${REMOTE_APP_DIR}
-ExecStart=${REMOTE_APP_DIR}/uploader --api-endpoint ${API_ENDPOINT} --api-key ${API_KEY} --infractions-dir ${REMOTE_INFRACTIONS_DIR} --serial-port ${SERIAL_PORT} --elf-path ${REMOTE_RADAR_BINARY}
+ExecStart=${REMOTE_APP_DIR}/uploader --api-endpoint ${API_ENDPOINT} --api-key ${API_KEY} --infractions-dir ${REMOTE_INFRACTIONS_DIR} --serial-port ${SERIAL_PORT} --config-serial-port ${CONFIG_SERIAL_PORT} --elf-path ${REMOTE_RADAR_BINARY}
 Restart=always
 RestartSec=5
 
@@ -314,6 +309,7 @@ while [ "$#" -gt 0 ]; do
     --host)
       require_option_value "$1" "${2:-}"
       REMOTE="$2"
+      REMOTE_FROM_CLI=1
       shift
       ;;
     --target)
@@ -326,6 +322,11 @@ while [ "$#" -gt 0 ]; do
     --serial-port)
       require_option_value "$1" "${2:-}"
       SERIAL_PORT="$2"
+      shift
+      ;;
+    --config-serial-port)
+      require_option_value "$1" "${2:-}"
+      CONFIG_SERIAL_PORT="$2"
       shift
       ;;
     --radar-binary)
@@ -376,23 +377,18 @@ while [ "$#" -gt 0 ]; do
       exit 1
       ;;
     *)
-      if [ -n "$REMOTE" ]; then
+      if [ "$REMOTE_FROM_CLI" -eq 1 ]; then
         echo "error: Multiple SSH hosts provided: ${REMOTE} and $1" >&2
         usage >&2
         exit 1
       fi
       REMOTE="$1"
+      REMOTE_FROM_CLI=1
       ;;
   esac
 
   shift
 done
-
-if [ -z "$REMOTE" ]; then
-  echo "error: Missing SSH host" >&2
-  usage >&2
-  exit 1
-fi
 
 LOCAL_TMP_DIR="$(mktemp -d)"
 

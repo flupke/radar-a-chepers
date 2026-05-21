@@ -2,7 +2,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, TimeDelta, Utc};
 use eyre::{Context, Result, eyre};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::{
     actor::{Actor, ActorPort},
@@ -11,6 +11,14 @@ use crate::{
 };
 
 const TARGET_PREFIX: &str = "EVENTS: TARGET: ";
+const TRIGGER_PREFIX: &str = "EVENTS: TRIGGER: ";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawTarget {
+    pub raw_speed_cm_s: i16,
+    pub x: i16,
+    pub y: i16,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RadarConfig {
@@ -35,13 +43,48 @@ pub struct TargetData {
     pub over_speed: bool,
     pub cooldown_elapsed: bool,
     pub capture_paused: bool,
+    pub capture_in_progress: bool,
     pub would_trigger: bool,
     pub triggered: bool,
 }
 
 pub struct InfractionRecorder {
     port: ActorPort<InfractionRecorderCommand>,
+    radar_input: RadarInput,
+}
+
+#[derive(Clone)]
+pub struct RadarInput {
+    target_tx: watch::Sender<Option<RawTarget>>,
+    trigger_tx: mpsc::UnboundedSender<RawTarget>,
     uploader_log_tx: broadcast::Sender<UploaderLog>,
+}
+
+impl RadarInput {
+    pub fn process_log_message(&self, message: String) {
+        if is_target_message(&message) {
+            match parse_raw_target_message(&message) {
+                Ok(target) => {
+                    let _ = self.target_tx.send(Some(target));
+                }
+                Err(err) => {
+                    log::error!("Failed to parse radar target: {err}");
+                }
+            }
+        } else if is_trigger_message(&message) {
+            match parse_raw_trigger_message(&message) {
+                Ok(target) => {
+                    let _ = self.trigger_tx.send(target);
+                }
+                Err(err) => {
+                    log::error!("Failed to parse radar trigger: {err}");
+                }
+            }
+        } else {
+            eprintln!("[radar firmware] {message}");
+            let _ = self.uploader_log_tx.send(UploaderLog::info(message));
+        }
+    }
 }
 
 impl InfractionRecorder {
@@ -53,16 +96,26 @@ impl InfractionRecorder {
         uploader_log_tx: broadcast::Sender<UploaderLog>,
         test_mode: bool,
     ) -> Self {
+        let (target_tx, target_rx) = watch::channel(None);
+        let (trigger_tx, trigger_rx) = mpsc::unbounded_channel();
+        let radar_input = RadarInput {
+            target_tx,
+            trigger_tx,
+            uploader_log_tx,
+        };
+
         Self {
             port: InfractionRecorderInner::new(
                 authorized_speed,
                 photos_dir,
                 infraction_uploader.port.clone(),
                 target_data_tx,
+                target_rx,
+                trigger_rx,
                 test_mode,
             )
             .start(),
-            uploader_log_tx,
+            radar_input,
         }
     }
 
@@ -70,25 +123,12 @@ impl InfractionRecorder {
         &self.port
     }
 
-    pub(crate) async fn process_log_message(&self, message: String) {
-        if !is_target_message(&message) {
-            let _ = self
-                .uploader_log_tx
-                .send(UploaderLog::info(message.clone()));
-        }
-
-        let (sender, receiver) = oneshot::channel();
-        self.port
-            .send(InfractionRecorderCommand::ProcessLogMessage(
-                sender, message,
-            ))
-            .expect("Failed to send message to infraction recorder");
-        receiver.await.unwrap();
+    pub fn radar_input(&self) -> RadarInput {
+        self.radar_input.clone()
     }
 }
 
 pub enum InfractionRecorderCommand {
-    ProcessLogMessage(oneshot::Sender<()>, String),
     UpdateConfig(RadarConfig),
 }
 
@@ -99,10 +139,13 @@ struct InfractionRecorderInner {
     trigger_cooldown_ms: i64,
     aperture_angle: i16,
     capture_paused: bool,
+    capture_in_progress: bool,
     last_capture_attempt_at: Option<DateTime<Utc>>,
     photos_dir: Utf8PathBuf,
     uploader_port: ActorPort<InfractionUploaderCommand>,
     target_data_tx: broadcast::Sender<TargetData>,
+    target_rx: watch::Receiver<Option<RawTarget>>,
+    trigger_rx: mpsc::UnboundedReceiver<RawTarget>,
     test_mode: bool,
 }
 
@@ -111,33 +154,56 @@ impl Actor for InfractionRecorderInner {
 
     async fn event_loop(
         mut self,
-        _port: ActorPort<Self::Command>,
+        port: ActorPort<Self::Command>,
         mut command_receiver: mpsc::UnboundedReceiver<Self::Command>,
     ) {
-        while let Some(command) = command_receiver.recv().await {
-            match command {
-                InfractionRecorderCommand::ProcessLogMessage(response_sender, message) => {
-                    if let Err(err) = self.update(message) {
-                        log::error!("Failed to update infraction recorder: {err}");
+        loop {
+            tokio::select! {
+                command = command_receiver.recv() => {
+                    let Some(command) = command else {
+                        break;
+                    };
+
+                    match command {
+                        InfractionRecorderCommand::UpdateConfig(config) => {
+                            log::info!(
+                                "Config updated: authorized_speed={}, min_dist={}, max_dist={}, trigger_cooldown={}ms, aperture_angle={}, capture_paused={}",
+                                config.authorized_speed,
+                                config.min_dist,
+                                config.max_dist,
+                                config.trigger_cooldown,
+                                config.aperture_angle,
+                                config.capture_paused
+                            );
+                            self.authorized_speed = config.authorized_speed;
+                            self.min_dist = config.min_dist;
+                            self.max_dist = config.max_dist;
+                            self.trigger_cooldown_ms = config.trigger_cooldown;
+                            self.aperture_angle = config.aperture_angle;
+                            self.capture_paused = config.capture_paused;
+                        }
                     }
-                    response_sender.send(()).unwrap();
                 }
-                InfractionRecorderCommand::UpdateConfig(config) => {
-                    log::info!(
-                        "Config updated: authorized_speed={}, min_dist={}, max_dist={}, trigger_cooldown={}ms, aperture_angle={}, capture_paused={}",
-                        config.authorized_speed,
-                        config.min_dist,
-                        config.max_dist,
-                        config.trigger_cooldown,
-                        config.aperture_angle,
-                        config.capture_paused
-                    );
-                    self.authorized_speed = config.authorized_speed;
-                    self.min_dist = config.min_dist;
-                    self.max_dist = config.max_dist;
-                    self.trigger_cooldown_ms = config.trigger_cooldown;
-                    self.aperture_angle = config.aperture_angle;
-                    self.capture_paused = config.capture_paused;
+                target_changed = self.target_rx.changed() => {
+                    if target_changed.is_err() {
+                        break;
+                    }
+
+                    let target = self.target_rx.borrow_and_update().clone();
+                    if let Some(target) = target {
+                        if let Err(err) = self.update_target(target, Some(&port)) {
+                            log::error!("Failed to update infraction recorder: {err}");
+                        }
+                    }
+                }
+                trigger = self.trigger_rx.recv() => {
+                    let Some(trigger) = trigger else {
+                        break;
+                    };
+
+                    if let Err(err) = self.record_trigger(trigger, Some(&port)) {
+                        log::error!("Failed to record radar trigger: {err}");
+                    }
                 }
             }
         }
@@ -150,6 +216,8 @@ impl InfractionRecorderInner {
         photos_dir: Utf8PathBuf,
         uploader_port: ActorPort<InfractionUploaderCommand>,
         target_data_tx: broadcast::Sender<TargetData>,
+        target_rx: watch::Receiver<Option<RawTarget>>,
+        trigger_rx: mpsc::UnboundedReceiver<RawTarget>,
         test_mode: bool,
     ) -> Self {
         Self {
@@ -159,27 +227,40 @@ impl InfractionRecorderInner {
             trigger_cooldown_ms: 1000,
             aperture_angle: 90,
             capture_paused: false,
+            capture_in_progress: false,
             photos_dir,
             uploader_port,
             target_data_tx,
+            target_rx,
+            trigger_rx,
             last_capture_attempt_at: None,
             test_mode,
         }
     }
 
-    fn update(&mut self, message: String) -> Result<()> {
-        if !is_target_message(&message) {
-            return Ok(());
+    fn update_target(
+        &mut self,
+        target: RawTarget,
+        _port: Option<&ActorPort<InfractionRecorderCommand>>,
+    ) -> Result<()> {
+        let target_data = self.target_data(target, false);
+        let would_trigger = target_data.would_trigger;
+        let _ = self.target_data_tx.send(target_data);
+
+        if would_trigger && self.capture_paused {
+            log::debug!("Capture paused: capture conditions met, not taking picture");
         }
-        let rest = message.strip_prefix(TARGET_PREFIX).unwrap();
-        let parts: Vec<&str> = rest.split_whitespace().collect();
-        if parts.len() != 3 {
-            return Ok(());
-        }
-        let raw_speed_cm_s = parts[0].parse::<i16>().wrap_err("Failed to parse speed")?;
+
+        Ok(())
+    }
+
+    fn target_data(&self, target: RawTarget, triggered: bool) -> TargetData {
+        let RawTarget {
+            raw_speed_cm_s,
+            x,
+            y,
+        } = target;
         let speed = raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s);
-        let x = parts[1].parse::<i16>().wrap_err("Failed to parse x")?;
-        let y = parts[2].parse::<i16>().wrap_err("Failed to parse y")?;
         let distance = ((x as f64).powi(2) + (y as f64).powi(2)).sqrt();
 
         let in_range = self.min_dist <= distance && distance <= self.max_dist;
@@ -195,9 +276,8 @@ impl InfractionRecorderInner {
             None => true,
         };
         let would_trigger = in_range && in_aperture && over_speed && cooldown_elapsed;
-        let triggered = would_trigger && !self.capture_paused;
 
-        let target_data = TargetData {
+        TargetData {
             raw_speed_cm_s,
             speed,
             x,
@@ -209,95 +289,102 @@ impl InfractionRecorderInner {
             over_speed,
             cooldown_elapsed,
             capture_paused: self.capture_paused,
+            capture_in_progress: self.capture_in_progress,
             would_trigger,
             triggered,
+        }
+    }
+
+    fn record_trigger(
+        &mut self,
+        trigger: RawTarget,
+        _port: Option<&ActorPort<InfractionRecorderCommand>>,
+    ) -> Result<()> {
+        let mut target_data = self.target_data(trigger, false);
+        target_data.triggered = target_data.would_trigger && !self.capture_paused;
+        let _ = self.target_data_tx.send(target_data.clone());
+
+        if self.capture_paused {
+            log::info!("Capture paused: ESP trigger received, not downloading picture");
+            return Ok(());
+        }
+
+        if !target_data.would_trigger {
+            log::info!("ESP trigger received, but server-side capture conditions no longer match");
+            return Ok(());
+        }
+
+        let now = Utc::now();
+        self.last_capture_attempt_at = Some(now);
+        let infraction = Infraction {
+            recorded_speed: target_data.speed,
+            authorized_speed: self.authorized_speed,
+            location: "Lorgues".to_string(),
+            datetime_taken: now,
         };
-        let _ = self.target_data_tx.send(target_data);
+        log::info!("Infraction: {infraction:#?}");
 
-        if would_trigger && self.capture_paused {
-            log::debug!("Capture paused: capture conditions met, not taking picture");
-        }
-
-        if triggered {
-            let infraction = Infraction {
-                recorded_speed: speed,
-                authorized_speed: self.authorized_speed,
-                location: "Lorgues".to_string(),
-                datetime_taken: now,
-            };
-            log::info!("Infraction: {infraction:#?}");
-            self.last_capture_attempt_at = Some(now);
-            self.take_picture(&infraction)?;
-            infraction.save_infraction_json(&self.photos_dir)?;
-            let _ = self
-                .uploader_port
-                .send(InfractionUploaderCommand::NotifyInfraction);
-        }
-        Ok(())
-    }
-
-    fn take_picture(&self, infraction: &Infraction) -> Result<()> {
-        let photo_path = infraction.photo_path(&self.photos_dir);
         if self.test_mode {
-            const TEST_PHOTO_JPEG: &[u8] = include_bytes!("test-photo.jpg");
-
-            std::fs::write(&photo_path, TEST_PHOTO_JPEG)?;
-            log::info!("Test mode: wrote test photo to {photo_path}");
-            return Ok(());
+            write_test_photo(&self.photos_dir, &infraction)?;
         }
-
-        let output = duct::cmd(
-            "gphoto2",
-            &[
-                "--set-config",
-                "imagequality=JPEG Fine",
-                "--capture-image-and-download",
-                "--force-overwrite",
-                "--filename",
-                photo_path.as_str(),
-            ],
-        )
-        .stderr_to_stdout()
-        .stdout_capture()
-        .unchecked()
-        .run()?;
-        if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(eyre!(
-                "gphoto2 command failed with status {}:\n{}",
-                output.status,
-                stdout
-            ));
-        }
-
-        if !photo_path.exists() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(eyre!(
-                "gphoto2 completed successfully but did not create {photo_path}:\n{}",
-                stdout
-            ));
-        }
-        self.ensure_jpeg(&photo_path)?;
-        log::info!("Saved photo to {photo_path}");
+        infraction.save_infraction_json(&self.photos_dir)?;
+        let _ = self
+            .uploader_port
+            .send(InfractionUploaderCommand::NotifyInfraction);
 
         Ok(())
     }
+}
 
-    fn ensure_jpeg(&self, photo_path: &Utf8Path) -> Result<()> {
-        let data = std::fs::read(photo_path)?;
-        if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
-            return Ok(());
-        }
+fn write_test_photo(photos_dir: &Utf8Path, infraction: &Infraction) -> Result<()> {
+    let photo_path = infraction.photo_path(photos_dir);
+    const TEST_PHOTO_JPEG: &[u8] = include_bytes!("test-photo.jpg");
 
-        Err(eyre!(
-            "captured file is not a JPEG: {photo_path}. Check camera imagequality; first bytes are {:#X?}",
-            &data[..data.len().min(8)]
-        ))
+    std::fs::write(&photo_path, TEST_PHOTO_JPEG)?;
+    log::info!("Test mode: wrote test photo to {photo_path}");
+
+    Ok(())
+}
+
+pub(crate) fn ensure_jpeg(photo_path: &Utf8Path) -> Result<()> {
+    let data = std::fs::read(photo_path)?;
+    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Ok(());
     }
+
+    Err(eyre!(
+        "captured file is not a JPEG: {photo_path}. Check camera imagequality; first bytes are {:#X?}",
+        &data[..data.len().min(8)]
+    ))
 }
 
 fn is_target_message(message: &str) -> bool {
     message.starts_with(TARGET_PREFIX)
+}
+
+fn is_trigger_message(message: &str) -> bool {
+    message.starts_with(TRIGGER_PREFIX)
+}
+
+fn parse_raw_target_message(message: &str) -> Result<RawTarget> {
+    parse_raw_radar_message(message.strip_prefix(TARGET_PREFIX).unwrap())
+}
+
+fn parse_raw_trigger_message(message: &str) -> Result<RawTarget> {
+    parse_raw_radar_message(message.strip_prefix(TRIGGER_PREFIX).unwrap())
+}
+
+fn parse_raw_radar_message(rest: &str) -> Result<RawTarget> {
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    if parts.len() != 3 {
+        return Err(eyre!("expected 3 target fields, got {}", parts.len()));
+    }
+
+    Ok(RawTarget {
+        raw_speed_cm_s: parts[0].parse::<i16>().wrap_err("Failed to parse speed")?,
+        x: parts[1].parse::<i16>().wrap_err("Failed to parse x")?,
+        y: parts[2].parse::<i16>().wrap_err("Failed to parse y")?,
+    })
 }
 
 fn raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s: i16) -> i16 {
@@ -366,11 +453,15 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let photos_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
         let (target_data_tx, target_data_rx) = broadcast::channel(8);
+        let (_target_tx, target_rx) = watch::channel(None);
+        let (_trigger_tx, trigger_rx) = mpsc::unbounded_channel();
         let recorder = InfractionRecorderInner::new(
             authorized_speed,
             photos_dir.clone(),
             NoopUploader.start(),
             target_data_tx,
+            target_rx,
+            trigger_rx,
             true,
         );
 
@@ -418,6 +509,18 @@ mod tests {
             .collect()
     }
 
+    fn raw_target(raw_speed_cm_s: i16, x: i16, y: i16) -> RawTarget {
+        RawTarget {
+            raw_speed_cm_s,
+            x,
+            y,
+        }
+    }
+
+    async fn receive_target(target_data_rx: &mut broadcast::Receiver<TargetData>) -> TargetData {
+        target_data_rx.recv().await.unwrap()
+    }
+
     #[test]
     fn converts_rd03d_raw_speed_to_kmh() {
         assert_eq!(raw_speed_cm_s_to_abs_kmh(0), 0);
@@ -436,10 +539,10 @@ mod tests {
                     test_infraction_recorder(100);
 
                 recorder
-                    .process_log_message("EVENTS: TARGET: 150 0 100".to_string())
-                    .await;
+                    .radar_input()
+                    .process_log_message("EVENTS: TARGET: 150 0 100".to_string());
 
-                let target_data = target_data_rx.try_recv().unwrap();
+                let target_data = receive_target(&mut target_data_rx).await;
                 assert_eq!(target_data.speed, 5);
                 assert!(matches!(
                     uploader_log_rx.try_recv(),
@@ -459,8 +562,8 @@ mod tests {
                     test_infraction_recorder(100);
 
                 recorder
-                    .process_log_message("camera disconnected".to_string())
-                    .await;
+                    .radar_input()
+                    .process_log_message("camera disconnected".to_string());
 
                 assert_eq!(
                     uploader_log_rx.try_recv().unwrap(),
@@ -475,7 +578,33 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn converts_raw_centimeters_per_second_before_triggering() {
+    async fn trigger_messages_record_infractions_without_forwarding_logs() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (temp_dir, recorder, mut target_data_rx, mut uploader_log_rx) =
+                    test_infraction_recorder(4);
+                let photos_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
+
+                recorder
+                    .radar_input()
+                    .process_log_message("EVENTS: TRIGGER: 150 0 100".to_string());
+
+                let target_data = receive_target(&mut target_data_rx).await;
+                assert_eq!(target_data.speed, 5);
+                assert!(target_data.triggered);
+                assert_eq!(saved_infractions(&photos_dir).len(), 1);
+                assert!(matches!(
+                    uploader_log_rx.try_recv(),
+                    Err(broadcast::error::TryRecvError::Empty)
+                ));
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn converts_raw_centimeters_per_second_before_recording_esp_trigger() {
         let local = tokio::task::LocalSet::new();
 
         local
@@ -483,17 +612,53 @@ mod tests {
                 let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
 
                 recorder
-                    .update("EVENTS: TARGET: 150 0 100".to_string())
+                    .update_target(raw_target(150, 0, 100), None)
                     .unwrap();
 
                 let target_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(target_data.speed, 5);
-                assert!(target_data.triggered);
+                assert!(target_data.would_trigger);
+                assert!(!target_data.triggered);
+                assert_eq!(saved_infractions(&photos_dir).len(), 0);
+
+                recorder
+                    .record_trigger(raw_target(150, 0, 100), None)
+                    .unwrap();
+
+                let trigger_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(trigger_data.speed, 5);
+                assert!(trigger_data.triggered);
 
                 let infractions = saved_infractions(&photos_dir);
                 assert_eq!(infractions.len(), 1);
                 assert_eq!(infractions[0].recorded_speed, 5);
                 assert_eq!(infractions[0].authorized_speed, 4);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn server_side_cooldown_still_guards_esp_triggers() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
+                recorder.trigger_cooldown_ms = 30_000;
+
+                recorder
+                    .record_trigger(raw_target(150, 0, 100), None)
+                    .unwrap();
+                recorder
+                    .record_trigger(raw_target(200, 0, 100), None)
+                    .unwrap();
+
+                let first_target = target_data_rx.try_recv().unwrap();
+                let second_target = target_data_rx.try_recv().unwrap();
+                assert!(first_target.triggered);
+                assert!(!second_target.triggered);
+                assert!(!second_target.cooldown_elapsed);
+                assert_eq!(saved_infractions(&photos_dir).len(), 1);
             })
             .await;
     }
@@ -507,12 +672,21 @@ mod tests {
                 let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
 
                 recorder
-                    .update("EVENTS: TARGET: -150 0 100".to_string())
+                    .update_target(raw_target(-150, 0, 100), None)
                     .unwrap();
 
                 let target_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(target_data.speed, 5);
-                assert!(target_data.triggered);
+                assert!(target_data.would_trigger);
+                assert!(!target_data.triggered);
+
+                recorder
+                    .record_trigger(raw_target(-150, 0, 100), None)
+                    .unwrap();
+
+                let trigger_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(trigger_data.speed, 5);
+                assert!(trigger_data.triggered);
 
                 let infractions = saved_infractions(&photos_dir);
                 assert_eq!(infractions.len(), 1);
@@ -531,10 +705,10 @@ mod tests {
                 recorder.trigger_cooldown_ms = 30_000;
 
                 recorder
-                    .update("EVENTS: TARGET: 150 0 100".to_string())
+                    .record_trigger(raw_target(150, 0, 100), None)
                     .unwrap();
                 recorder
-                    .update("EVENTS: TARGET: 200 0 100".to_string())
+                    .update_target(raw_target(200, 0, 100), None)
                     .unwrap();
 
                 let first_target = target_data_rx.try_recv().unwrap();
@@ -542,6 +716,7 @@ mod tests {
                 assert!(first_target.triggered);
                 assert_eq!(first_target.speed, 5);
                 assert!(!second_target.triggered);
+                assert!(!second_target.cooldown_elapsed);
                 assert_eq!(second_target.speed, 7);
 
                 assert_eq!(saved_infractions(&photos_dir).len(), 1);
@@ -560,7 +735,7 @@ mod tests {
                 recorder.photos_dir = recorder.photos_dir.join("missing");
 
                 let err = recorder
-                    .update("EVENTS: TARGET: 150 0 100".to_string())
+                    .record_trigger(raw_target(150, 0, 100), None)
                     .unwrap_err();
                 assert!(
                     err.to_string().contains("No such file")
@@ -568,13 +743,37 @@ mod tests {
                 );
 
                 recorder
-                    .update("EVENTS: TARGET: 200 0 100".to_string())
+                    .update_target(raw_target(200, 0, 100), None)
                     .unwrap();
 
                 let first_target = target_data_rx.try_recv().unwrap();
                 let second_target = target_data_rx.try_recv().unwrap();
                 assert!(first_target.triggered);
                 assert!(!second_target.triggered);
+                assert!(!second_target.cooldown_elapsed);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn photo_retrieval_backlog_does_not_block_new_triggers() {
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
+                recorder.capture_in_progress = true;
+                recorder.last_capture_attempt_at = Some(Utc::now() - TimeDelta::seconds(60));
+
+                recorder
+                    .record_trigger(raw_target(200, 0, 100), None)
+                    .unwrap();
+
+                let target_data = target_data_rx.try_recv().unwrap();
+                assert_eq!(target_data.speed, 7);
+                assert!(target_data.capture_in_progress);
+                assert!(target_data.triggered);
+                assert_eq!(saved_infractions(&photos_dir).len(), 1);
             })
             .await;
     }
@@ -589,7 +788,7 @@ mod tests {
                 recorder.capture_paused = true;
 
                 recorder
-                    .update("EVENTS: TARGET: 2222 0 100".to_string())
+                    .update_target(raw_target(2222, 0, 100), None)
                     .unwrap();
 
                 let target_data = target_data_rx.try_recv().unwrap();

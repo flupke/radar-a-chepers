@@ -15,6 +15,7 @@ defmodule Radar.Application do
       {DNSCluster, query: Application.get_env(:radar, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Radar.PubSub},
       RadarWeb.Presence,
+      Radar.RadarData,
       # Start a worker by calling: Radar.Worker.start_link(arg)
       # {Radar.Worker, arg},
       # Start to serve requests, typically the last entry

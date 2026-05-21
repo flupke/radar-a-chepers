@@ -3,17 +3,15 @@ use std::time::Duration;
 use rand::Rng;
 use tokio::time::sleep;
 
-use crate::{actor::Actor, infraction_recorder::InfractionRecorder};
+use crate::{actor::Actor, infraction_recorder::RadarInput};
 
 pub struct FakeRadarReader {
-    infraction_recorder: InfractionRecorder,
+    radar_input: RadarInput,
 }
 
 impl FakeRadarReader {
-    pub fn new(infraction_recorder: InfractionRecorder) -> Self {
-        Self {
-            infraction_recorder,
-        }
+    pub fn new(radar_input: RadarInput) -> Self {
+        Self { radar_input }
     }
 }
 
@@ -94,7 +92,7 @@ impl Actor for FakeRadarReader {
                     target.x as i16,
                     target.y as i16,
                 );
-                self.infraction_recorder.process_log_message(message).await;
+                self.radar_input.process_log_message(message);
                 target.step(dt, &mut rng);
                 sleep(Duration::from_millis(TICK_MS)).await;
             }

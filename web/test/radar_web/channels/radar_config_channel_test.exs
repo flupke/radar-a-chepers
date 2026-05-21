@@ -7,6 +7,11 @@ defmodule RadarWeb.RadarConfigChannelTest do
 
   @uploader_debug_topic "uploader_debug"
 
+  setup do
+    Radar.RadarData.clear()
+    :ok
+  end
+
   test "get_config replies with capture pause state for uploader clients" do
     assert {:ok, _reply, socket} =
              Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
@@ -48,6 +53,7 @@ defmodule RadarWeb.RadarConfigChannelTest do
     push(socket, "target_data", %{"x" => 1, "y" => 2})
 
     assert_receive {:target_data, %{"x" => 1, "y" => 2}}
+    assert Radar.RadarData.last_target() == %{"x" => 1, "y" => 2}
   end
 
   test "tracks uploader channel joins" do

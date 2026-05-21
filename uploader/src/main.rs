@@ -9,7 +9,7 @@ use uploader::{
     fake_radar_reader::FakeRadarReader,
     infraction_recorder::{InfractionRecorder, InfractionRecorderCommand},
     infraction_uploader::InfractionUploader,
-    radar_reader::RadarReader,
+    radar_reader::{RadarReader, RadarReaderCommand},
     uploader_logger,
 };
 
@@ -24,6 +24,9 @@ struct Args {
 
     #[arg(short, long)]
     serial_port: Option<String>,
+
+    #[arg(long)]
+    config_serial_port: Option<String>,
 
     #[arg(long)]
     elf_path: Option<Utf8PathBuf>,
@@ -58,6 +61,11 @@ impl Args {
             if self.serial_port.is_none() {
                 return Err(eyre!("--serial-port is required when not in test mode"));
             }
+            if self.config_serial_port.is_none() {
+                return Err(eyre!(
+                    "--config-serial-port is required when not in test mode"
+                ));
+            }
         }
         Ok(())
     }
@@ -91,10 +99,11 @@ async fn main() -> Result<()> {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let infraction_uploader = InfractionUploader::new(
+            let infraction_uploader = InfractionUploader::new_with_photo_retrieval(
                 args.infractions_dir.clone(),
                 args.api_endpoint,
                 args.api_key,
+                !test_mode,
             );
             let infraction_recorder = InfractionRecorder::new(
                 25,
@@ -105,24 +114,35 @@ async fn main() -> Result<()> {
                 test_mode,
             );
             let recorder_port = infraction_recorder.port().clone();
-
-            // Bridge: forward config updates from the Send channel to the local actor
-            tokio::task::spawn_local(async move {
-                while let Some(config) = config_rx.recv().await {
-                    let _ = recorder_port.send(InfractionRecorderCommand::UpdateConfig(config));
-                }
-            });
+            let radar_input = infraction_recorder.radar_input();
 
             if test_mode {
-                let reader = FakeRadarReader::new(infraction_recorder).start();
+                tokio::task::spawn_local(async move {
+                    while let Some(config) = config_rx.recv().await {
+                        let _ = recorder_port.send(InfractionRecorderCommand::UpdateConfig(config));
+                    }
+                });
+
+                let reader = FakeRadarReader::new(radar_input).start();
                 reader.join().await;
             } else {
                 let reader = RadarReader::new(
                     args.elf_path.unwrap(),
                     args.serial_port.unwrap(),
-                    infraction_recorder,
+                    args.config_serial_port.unwrap(),
+                    radar_input,
                 )
                 .start();
+                let reader_port = reader.clone();
+
+                tokio::task::spawn_local(async move {
+                    while let Some(config) = config_rx.recv().await {
+                        let _ = recorder_port
+                            .send(InfractionRecorderCommand::UpdateConfig(config.clone()));
+                        let _ = reader_port.send(RadarReaderCommand::UpdateConfig(config));
+                    }
+                });
+
                 reader.join().await;
             }
         })

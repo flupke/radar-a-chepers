@@ -13,7 +13,15 @@ LOCAL_API_ENDPOINT="${LOCAL_API_ENDPOINT:-http://localhost:4000}"
 LOCAL_API_ENDPOINT="${LOCAL_API_ENDPOINT%/}"
 
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
+CONFIG_SERIAL_PORT="${CONFIG_SERIAL_PORT:-/dev/serial0}"
 RADAR_BINARY="${RADAR_BINARY:-${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers}"
+
+SSH_BIN="${SSH_BIN:-ssh}"
+REMOTE_UPLOADER_HOST="${REMOTE_UPLOADER_HOST:-}"
+REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/radar-a-chepers}"
+REMOTE_INFRACTIONS_DIR="${REMOTE_INFRACTIONS_DIR:-/var/lib/radar-a-chepers/infractions}"
+REMOTE_RADAR_BINARY="${REMOTE_RADAR_BINARY:-${REMOTE_APP_DIR}/radar-a-chepers}"
+REMOTE_SERVICE_NAME="${REMOTE_SERVICE_NAME:-radar-uploader.service}"
 
 FAKE_PEOPLE=0
 LOCAL_WEB=0
@@ -21,18 +29,37 @@ START_WEB_ONLY="${START_WEB_ONLY:-0}"
 
 CHILD_PIDS=()
 SHUTTING_DOWN=0
+REMOTE_UPLOADER_STARTED=0
 
 usage() {
   cat <<EOF
-Usage: ./start.sh [--fake-people] [--local-web]
+Usage: ./start.sh [--fake-people] [--local-web] [--remote-uploader HOST]
 
 By default, starts the uploader in live hardware mode connected to ${FLY_APP_URL}.
 
 Options:
-  --fake-people  Start the uploader with --test-mode.
-  --local-web    Start the Phoenix web server locally and connect the uploader to it.
-  -h, --help     Show this help.
+  --fake-people           Start the uploader with --test-mode.
+  --local-web             Start the Phoenix web server locally and connect the uploader to it.
+  --remote-uploader HOST  With --local-web, run the installed Pi uploader over SSH and
+                          point it at this machine's LAN URL.
+  SERIAL_PORT and CONFIG_SERIAL_PORT override the live hardware serial devices.
+  LOCAL_API_ENDPOINT_LAN overrides the URL given to the remote Pi.
+  -h, --help              Show this help.
 EOF
+}
+
+shell_quote() {
+  printf '%q' "$1"
+}
+
+require_option_value() {
+  local option="$1"
+  local value="${2:-}"
+
+  if [ -z "$value" ]; then
+    echo "error: ${option} requires a value" >&2
+    exit 1
+  fi
 }
 
 cleanup() {
@@ -50,6 +77,12 @@ cleanup() {
     echo "==> Shutting down..."
     kill -TERM "${CHILD_PIDS[@]}" 2>/dev/null || true
     wait "${CHILD_PIDS[@]}" 2>/dev/null || true
+  fi
+
+  if [ "$REMOTE_UPLOADER_STARTED" = 1 ]; then
+    echo "==> Restarting ${REMOTE_SERVICE_NAME} on ${REMOTE_UPLOADER_HOST}..."
+    "$SSH_BIN" "$REMOTE_UPLOADER_HOST" \
+      "sudo systemctl restart $(shell_quote "$REMOTE_SERVICE_NAME")" 2>/dev/null || true
   fi
 
   exit "$status"
@@ -104,6 +137,78 @@ start_web() {
   wait_for_url "${LOCAL_API_ENDPOINT}/"
 }
 
+local_api_port() {
+  local without_scheme="${LOCAL_API_ENDPOINT#*://}"
+  local host_port="${without_scheme%%/*}"
+
+  if [[ "$host_port" == *:* ]]; then
+    printf '%s\n' "${host_port##*:}"
+  elif [[ "$LOCAL_API_ENDPOINT" == https://* ]]; then
+    printf '%s\n' "443"
+  else
+    printf '%s\n' "80"
+  fi
+}
+
+detect_lan_host() {
+  local host
+
+  if [ -n "${LOCAL_WEB_LAN_HOST:-}" ]; then
+    printf '%s\n' "$LOCAL_WEB_LAN_HOST"
+    return
+  fi
+
+  if command -v ip >/dev/null 2>&1 && [ -n "$REMOTE_UPLOADER_HOST" ]; then
+    host="$REMOTE_UPLOADER_HOST"
+
+    if command -v getent >/dev/null 2>&1; then
+      host="$(getent ahostsv4 "$REMOTE_UPLOADER_HOST" | awk '{print $1; exit}')"
+      host="${host:-$REMOTE_UPLOADER_HOST}"
+    fi
+
+    host="$(
+      ip -4 route get "$host" 2>/dev/null |
+        awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}'
+    )"
+
+    if [ -n "$host" ]; then
+      printf '%s\n' "$host"
+      return
+    fi
+  fi
+
+  if command -v hostname >/dev/null 2>&1; then
+    host="$(hostname -I 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^[0-9.]+$/) {print $i; exit}}')"
+    if [ -n "$host" ]; then
+      printf '%s\n' "$host"
+      return
+    fi
+  fi
+
+  echo "error: Could not detect this machine's LAN IP." >&2
+  echo "       Set LOCAL_API_ENDPOINT_LAN=http://<this-machine-ip>:$(local_api_port)." >&2
+  exit 1
+}
+
+url_host() {
+  local host="$1"
+
+  if [[ "$host" == *:* && "$host" != \[*\] ]]; then
+    printf '[%s]\n' "$host"
+  else
+    printf '%s\n' "$host"
+  fi
+}
+
+local_api_endpoint_for_lan() {
+  if [ -n "${LOCAL_API_ENDPOINT_LAN:-}" ]; then
+    printf '%s\n' "${LOCAL_API_ENDPOINT_LAN%/}"
+    return
+  fi
+
+  printf 'http://%s:%s\n' "$(url_host "$(detect_lan_host)")" "$(local_api_port)"
+}
+
 ensure_radar_binary() {
   local newer_source
 
@@ -145,7 +250,11 @@ start_uploader() {
     args+=(--test-mode)
   else
     ensure_radar_binary
-    args+=(--serial-port "$SERIAL_PORT" --elf-path "$RADAR_BINARY")
+    args+=(
+      --serial-port "$SERIAL_PORT"
+      --config-serial-port "$CONFIG_SERIAL_PORT"
+      --elf-path "$RADAR_BINARY"
+    )
   fi
 
   (
@@ -157,6 +266,33 @@ start_uploader() {
   CHILD_PIDS+=("$!")
 }
 
+start_remote_uploader() {
+  local api_endpoint="$1"
+  local api_key="$2"
+  local command
+
+  require_command "$SSH_BIN"
+
+  command=$(
+    printf 'set -eu; '
+    printf 'sudo systemctl stop %s 2>/dev/null || true; ' "$(shell_quote "$REMOTE_SERVICE_NAME")"
+    printf 'exec sudo env RUST_LOG=%s %s ' \
+      "$(shell_quote "${RUST_LOG:-info}")" \
+      "$(shell_quote "${REMOTE_APP_DIR}/uploader")"
+    printf '%s %s ' "--api-endpoint" "$(shell_quote "$api_endpoint")"
+    printf '%s %s ' "--api-key" "$(shell_quote "$api_key")"
+    printf '%s %s ' "--infractions-dir" "$(shell_quote "$REMOTE_INFRACTIONS_DIR")"
+    printf '%s %s ' "--serial-port" "$(shell_quote "$SERIAL_PORT")"
+    printf '%s %s ' "--config-serial-port" "$(shell_quote "$CONFIG_SERIAL_PORT")"
+    printf '%s %s' "--elf-path" "$(shell_quote "$REMOTE_RADAR_BINARY")"
+  )
+
+  echo "==> Starting uploader on ${REMOTE_UPLOADER_HOST} against ${api_endpoint}..."
+  "$SSH_BIN" "$REMOTE_UPLOADER_HOST" "$command" &
+  CHILD_PIDS+=("$!")
+  REMOTE_UPLOADER_STARTED=1
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --fake-people)
@@ -164,6 +300,11 @@ while [ "$#" -gt 0 ]; do
       ;;
     --local-web)
       LOCAL_WEB=1
+      ;;
+    --remote-uploader)
+      require_option_value "$1" "${2:-}"
+      REMOTE_UPLOADER_HOST="$2"
+      shift
       ;;
     -h | --help)
       usage
@@ -179,9 +320,24 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+if [ -n "$REMOTE_UPLOADER_HOST" ] && [ "$LOCAL_WEB" != 1 ]; then
+  echo "error: --remote-uploader requires --local-web" >&2
+  exit 1
+fi
+
+if [ -n "$REMOTE_UPLOADER_HOST" ] && [ "$FAKE_PEOPLE" = 1 ]; then
+  echo "error: --remote-uploader cannot be combined with --fake-people" >&2
+  exit 1
+fi
+
 if [ "$START_WEB_ONLY" = 1 ]; then
   if [ "$LOCAL_WEB" != 1 ]; then
     echo "error: START_WEB_ONLY=1 requires --local-web" >&2
+    exit 1
+  fi
+
+  if [ -n "$REMOTE_UPLOADER_HOST" ]; then
+    echo "error: START_WEB_ONLY=1 cannot be combined with --remote-uploader" >&2
     exit 1
   fi
 
@@ -192,6 +348,9 @@ if [ "$LOCAL_WEB" = 1 ]; then
   API_ENDPOINT="$LOCAL_API_ENDPOINT"
   API_KEY="${API_KEY:-radar-dev-key}"
   start_web
+  if [ -n "$REMOTE_UPLOADER_HOST" ]; then
+    API_ENDPOINT="$(local_api_endpoint_for_lan)"
+  fi
 elif [ -n "${API_ENDPOINT:-}" ]; then
   API_ENDPOINT="${API_ENDPOINT%/}"
   API_KEY="${API_KEY:-radar-dev-key}"
@@ -206,7 +365,11 @@ else
   fi
 fi
 
-start_uploader "$API_ENDPOINT" "$API_KEY"
+if [ -n "$REMOTE_UPLOADER_HOST" ]; then
+  start_remote_uploader "$API_ENDPOINT" "$API_KEY"
+else
+  start_uploader "$API_ENDPOINT" "$API_KEY"
+fi
 
 set +e
 wait -n "${CHILD_PIDS[@]}"

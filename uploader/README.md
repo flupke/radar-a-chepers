@@ -9,7 +9,8 @@ The uploader is configured via CLI flags:
 - `--api-endpoint`: The URL of the API endpoint to upload photos to.
 - `--api-key`: The authentication key for the API endpoint.
 - `--infractions-dir`: The directory where pending infraction photos and JSON are stored.
-- `--serial-port`: The radar serial device, for example `/dev/ttyACM0`.
+- `--serial-port`: The ESP USB serial device used for firmware logs, for example `/dev/ttyACM0`.
+- `--config-serial-port`: The Pi UART device used to send trigger config to the ESP, for example `/dev/serial0`.
 - `--elf-path`: The radar firmware ELF used for defmt decoding.
 - `--test-mode`: Run with simulated radar data.
 

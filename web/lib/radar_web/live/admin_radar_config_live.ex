@@ -3,7 +3,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   import RadarWeb.AdminComponents
 
-  alias Radar.{Infractions, RadarConfigs}
+  alias Radar.{Infractions, RadarConfigs, RadarData}
   alias Phoenix.LiveView.ColocatedHook
   alias RadarWeb.Presence
 
@@ -20,6 +20,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
     end
 
     config = RadarConfigs.get_config!()
+    last_target = last_known_target()
 
     socket =
       socket
@@ -27,7 +28,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
       |> assign(:form, config_to_form(config))
       |> assign(:infraction_count, Infractions.count_infractions())
       |> assign(:uploader_debug, %{connected: Presence.uploader_connected?(), logs: []})
-      |> assign(:last_target, nil)
+      |> assign(:last_target, last_target)
       |> push_config_event(config)
 
     {:ok, socket}
@@ -269,6 +270,10 @@ defmodule RadarWeb.AdminRadarConfigLive do
                   <span class={debug_bool_class(!@last_target.capture_paused)}>
                     {yes_no(@last_target.capture_paused)}
                   </span>
+                  <span class="opacity-70">Capture busy</span>
+                  <span class={debug_bool_class(!@last_target.capture_in_progress)}>
+                    {yes_no(@last_target.capture_in_progress)}
+                  </span>
                   <span class="opacity-70">Would capture</span>
                   <span class={debug_bool_class(@last_target.would_trigger)}>
                     {yes_no(@last_target.would_trigger)}
@@ -288,7 +293,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
             <div class="flex items-center justify-between gap-4">
               <h2 class="card-title">Uploader Status</h2>
               <div id="uploader-connected" class="flex items-center gap-2 text-sm">
-                <span class="opacity-70">Uploader connected</span>
+                <span class="opacity-70">Uploader connected here</span>
                 <span class={uploader_status_class(@uploader_debug.connected)}>
                   {yes_no(@uploader_debug.connected)}
                 </span>
@@ -531,9 +536,17 @@ defmodule RadarWeb.AdminRadarConfigLive do
       over_speed: target_bool(data, "over_speed"),
       cooldown_elapsed: target_bool(data, "cooldown_elapsed"),
       capture_paused: target_bool(data, "capture_paused"),
+      capture_in_progress: target_bool(data, "capture_in_progress"),
       would_trigger: target_bool(data, "would_trigger"),
       triggered: target_bool(data, "triggered")
     }
+  end
+
+  defp last_known_target do
+    case RadarData.last_target() do
+      nil -> nil
+      target -> normalize_target_data(target)
+    end
   end
 
   defp target_number(data, key, default) do

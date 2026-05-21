@@ -12,6 +12,7 @@ defmodule RadarWeb.AdminLiveTest do
   setup do
     Repo.delete_all(Radar.Infraction)
     Repo.delete_all(Radar.Photo)
+    Radar.RadarData.clear()
 
     :ok
   end
@@ -103,6 +104,7 @@ defmodule RadarWeb.AdminLiveTest do
         "over_speed" => false,
         "cooldown_elapsed" => true,
         "capture_paused" => false,
+        "capture_in_progress" => false,
         "would_trigger" => false,
         "triggered" => false
       }

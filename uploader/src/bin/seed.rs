@@ -60,8 +60,12 @@ async fn main() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let uploader =
-                InfractionUploader::new(infractions_dir, args.api_endpoint, args.api_key);
+            let uploader = InfractionUploader::new_with_photo_retrieval(
+                infractions_dir,
+                args.api_endpoint,
+                args.api_key,
+                false,
+            );
             uploader
                 .port
                 .send(InfractionUploaderCommand::NotifyInfraction)

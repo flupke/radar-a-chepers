@@ -4,6 +4,7 @@ defmodule RadarWeb.RadarConfigChannel do
 
   require Logger
 
+  alias Radar.RadarData
   alias Radar.RadarConfigs
 
   @uploader_debug_topic "uploader_debug"
@@ -31,7 +32,7 @@ defmodule RadarWeb.RadarConfigChannel do
 
   @impl true
   def handle_in("target_data", payload, socket) do
-    Phoenix.PubSub.broadcast(Radar.PubSub, "radar_data", {:target_data, payload})
+    RadarData.update_target(payload)
     {:noreply, socket}
   end
 
