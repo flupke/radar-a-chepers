@@ -13,10 +13,10 @@ use bt_hci::controller::ExternalController;
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::{
+    Async,
     clock::CpuClock,
     timer::{systimer::SystemTimer, timg::TimerGroup},
     uart::{Config, DataBits, Parity, StopBits, Uart, UartRx, UartTx},
-    Async,
 };
 use esp_println as _;
 use esp_wifi::ble::controller::BleConnector;
@@ -26,12 +26,14 @@ use radar_a_chepers::{
         SET_SINGLE_TARGET,
     },
     target::{
-        targets_list_header_position, TargetsList, TARGETS_LIST_HEADER_LENGTH, TARGETS_LIST_LENGTH,
+        TARGETS_LIST_HEADER_LENGTH, TARGETS_LIST_LENGTH, TargetsList, targets_list_header_position,
     },
 };
 
 const READ_BUF_SIZE: usize = 64;
 const STREAM_BUF_SIZE: usize = 128;
+const RADAR_INIT_RETRY_DELAY: embassy_time::Duration = embassy_time::Duration::from_secs(2);
+const RADAR_PASSIVE_PROBE_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(2);
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -59,10 +61,17 @@ fn command_response_header_position(buffer: &[u8]) -> Option<(usize, usize)> {
     }
 }
 
-async fn write(tx: &mut UartTx<'static, Async>, bytes: &[u8]) {
+async fn write(tx: &mut UartTx<'static, Async>, bytes: &[u8]) -> Result<(), ()> {
     defmt::info!("TX: {:#X}", bytes);
-    embedded_io_async::Write::write(tx, bytes).await.unwrap();
-    embedded_io_async::Write::flush(tx).await.unwrap();
+    embedded_io_async::Write::write(tx, bytes)
+        .await
+        .map_err(|err| {
+            defmt::warn!("UART write failed: {:?}", err);
+        })?;
+    embedded_io_async::Write::flush(tx).await.map_err(|err| {
+        defmt::warn!("UART flush failed: {:?}", err);
+    })?;
+    Ok(())
 }
 
 /// Actively reads from the UART until it's empty to clear out old or junk data.
@@ -77,7 +86,62 @@ async fn flush_rx(rx: &mut UartRx<'static, Async>) {
     .ok();
 }
 
-async fn wait_for_ack(rx: &mut UartRx<'static, Async>) {
+async fn probe_radar_rx(rx: &mut UartRx<'static, Async>) -> bool {
+    let mut chunk = [0u8; READ_BUF_SIZE];
+    let mut byte_count = 0usize;
+    let mut target_header_seen = false;
+    let mut previous = [0u8; TARGETS_LIST_HEADER_LENGTH - 1];
+    let mut previous_len = 0usize;
+
+    let _ = embassy_time::with_timeout(RADAR_PASSIVE_PROBE_DURATION, async {
+        loop {
+            match embedded_io_async::Read::read(rx, &mut chunk).await {
+                Ok(len) => {
+                    if len == 0 {
+                        continue;
+                    }
+
+                    defmt::info!("Passive radar RX: {:#X}", &chunk[..len]);
+                    byte_count += len;
+
+                    let mut combined = [0u8; READ_BUF_SIZE + TARGETS_LIST_HEADER_LENGTH - 1];
+                    combined[..previous_len].copy_from_slice(&previous[..previous_len]);
+                    combined[previous_len..previous_len + len].copy_from_slice(&chunk[..len]);
+                    if targets_list_header_position(&combined[..previous_len + len]).is_some() {
+                        target_header_seen = true;
+                    }
+
+                    let keep = (previous_len + len).min(previous.len());
+                    combined.copy_within(previous_len + len - keep..previous_len + len, 0);
+                    previous[..keep].copy_from_slice(&combined[..keep]);
+                    previous_len = keep;
+                }
+                Err(err) => {
+                    defmt::warn!("Passive radar RX error: {:?}", err);
+                }
+            }
+        }
+    })
+    .await;
+
+    if byte_count == 0 {
+        defmt::warn!(
+            "No bytes received from radar module during {} ms passive probe",
+            RADAR_PASSIVE_PROBE_DURATION.as_millis()
+        );
+    } else if target_header_seen {
+        defmt::info!("Radar target frame header observed during passive probe");
+    } else {
+        defmt::warn!(
+            "Received {} byte(s) from radar during passive probe, but no target frame header",
+            byte_count
+        );
+    }
+
+    target_header_seen
+}
+
+async fn wait_for_ack(rx: &mut UartRx<'static, Async>) -> Result<(), ()> {
     let mut buffer = [0u8; STREAM_BUF_SIZE];
     let mut chunk = [0u8; READ_BUF_SIZE];
     let mut offset = 0;
@@ -147,8 +211,62 @@ async fn wait_for_ack(rx: &mut UartRx<'static, Async>) {
     })
     .await;
 
-    if result.is_err() {
-        panic!("Timed out waiting for ACK.");
+    match result {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            defmt::warn!("Timed out waiting for ACK.");
+            Err(())
+        }
+    }
+}
+
+async fn send_command_and_wait_for_ack(
+    tx: &mut UartTx<'static, Async>,
+    rx: &mut UartRx<'static, Async>,
+    command: &[u8],
+) -> Result<(), ()> {
+    write(tx, command).await?;
+    wait_for_ack(rx).await
+}
+
+async fn configure_radar(tx: &mut UartTx<'static, Async>, rx: &mut UartRx<'static, Async>) {
+    let mut attempt = 1;
+
+    loop {
+        defmt::info!("Configuring radar module, attempt {}", attempt);
+        let target_stream_seen = probe_radar_rx(rx).await;
+
+        let result = async {
+            send_command_and_wait_for_ack(tx, rx, OPEN_COMMAND_MODE.get()).await?;
+            send_command_and_wait_for_ack(tx, rx, SET_SINGLE_TARGET.get()).await?;
+            send_command_and_wait_for_ack(tx, rx, CLOSE_COMMAND_MODE.get()).await?;
+            Ok(())
+        }
+        .await;
+
+        match result {
+            Ok(()) => {
+                flush_rx(rx).await;
+                defmt::info!("Entered single target mode");
+                return;
+            }
+            Err(()) => {
+                if target_stream_seen {
+                    defmt::warn!(
+                        "Radar configuration was not acknowledged, but target stream is already present; continuing"
+                    );
+                    return;
+                }
+
+                defmt::warn!(
+                    "Radar module did not acknowledge configuration attempt {}; retrying in {} ms",
+                    attempt,
+                    RADAR_INIT_RETRY_DELAY.as_millis()
+                );
+                attempt += 1;
+                embassy_time::Timer::after(RADAR_INIT_RETRY_DELAY).await;
+            }
+        }
     }
 }
 
@@ -258,16 +376,7 @@ async fn main(spawner: Spawner) {
     let (mut rx, mut tx) = uart1.split();
     defmt::info!("UART initialized");
 
-    // Set detection mode
-    flush_rx(&mut rx).await;
-    write(&mut tx, OPEN_COMMAND_MODE.get()).await;
-    wait_for_ack(&mut rx).await;
-    write(&mut tx, SET_SINGLE_TARGET.get()).await;
-    wait_for_ack(&mut rx).await;
-    write(&mut tx, CLOSE_COMMAND_MODE.get()).await;
-    wait_for_ack(&mut rx).await;
-    flush_rx(&mut rx).await;
-    defmt::info!("Entered single target mode");
+    configure_radar(&mut tx, &mut rx).await;
 
     spawner.spawn(reader(rx)).ok();
 }
