@@ -8,6 +8,7 @@ defmodule RadarWeb.AdminLiveTest do
   alias RadarWeb.Presence
 
   @uploader_debug_topic "uploader_debug"
+  @device_type "rd03d"
 
   setup do
     Repo.delete_all(Radar.Infraction)
@@ -140,7 +141,7 @@ defmodule RadarWeb.AdminLiveTest do
         |> Phoenix.LiveViewTest.render_change()
       end)
 
-    config = RadarConfigs.get_config!()
+    config = RadarConfigs.get_config!(@device_type)
 
     assert config.authorized_speed == 55
     assert config.min_dist == 6500
@@ -167,7 +168,7 @@ defmodule RadarWeb.AdminLiveTest do
       |> assert_has("p", "Camera capture is active.")
       |> assert_has("button[aria-pressed='false']", "Pause radar")
 
-    assert RadarConfigs.config_payload(RadarConfigs.get_config!()).capture_paused == false
+    assert RadarConfigs.config_payload(@device_type).capture_paused == false
 
     session =
       session
@@ -175,14 +176,14 @@ defmodule RadarWeb.AdminLiveTest do
       |> assert_has("p", "Camera capture is paused.")
       |> assert_has("button[aria-pressed='true']", "Resume radar")
 
-    assert RadarConfigs.config_payload(RadarConfigs.get_config!()).capture_paused == true
+    assert RadarConfigs.config_payload(@device_type).capture_paused == true
 
     session
     |> click_button("Resume radar")
     |> assert_has("p", "Camera capture is active.")
     |> assert_has("button[aria-pressed='false']", "Pause radar")
 
-    assert RadarConfigs.config_payload(RadarConfigs.get_config!()).capture_paused == false
+    assert RadarConfigs.config_payload(@device_type).capture_paused == false
   end
 
   test "lists infractions with individual photo links and a reliable page archive", %{conn: conn} do

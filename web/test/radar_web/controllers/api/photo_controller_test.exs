@@ -7,6 +7,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
 
   @valid_api_key "radar-dev-key"
   @invalid_api_key "invalid-key"
+  @device_type "rd03d"
 
   @valid_infraction_data %{
     "datetime_taken" => "2024-01-15T14:30:00",
@@ -153,7 +154,7 @@ defmodule RadarWeb.Api.PhotoControllerTest do
     end
 
     test "rejects photo uploads while capture is paused", %{conn: conn, upload: upload} do
-      assert {:ok, _config} = RadarConfigs.update_config(%{capture_paused: true})
+      assert {:ok, _config} = RadarConfigs.update_config(@device_type, %{capture_paused: true})
 
       conn =
         conn

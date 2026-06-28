@@ -8,6 +8,8 @@ defmodule RadarWeb.RadarConfigChannel do
   alias Radar.RadarConfigs
 
   @uploader_debug_topic "uploader_debug"
+  @device_type "rd03d"
+
   @impl true
   def join("radar:config", _payload, socket) do
     case RadarWeb.Presence.track_uploader(self()) do
@@ -21,8 +23,8 @@ defmodule RadarWeb.RadarConfigChannel do
 
   @impl true
   def handle_in("get_config", _payload, socket) do
-    config = RadarConfigs.get_config!()
-    {:reply, {:ok, RadarConfigs.config_payload(config)}, socket}
+    config = RadarConfigs.get_config!(@device_type)
+    {:reply, {:ok, RadarConfigs.config_payload(@device_type, config)}, socket}
   end
 
   @impl true
@@ -52,10 +54,12 @@ defmodule RadarWeb.RadarConfigChannel do
   end
 
   @impl true
-  def handle_info({:config_updated, config}, socket) do
-    push(socket, "config_updated", RadarConfigs.config_payload(config))
+  def handle_info({:config_updated, %{device_type: @device_type} = config}, socket) do
+    push(socket, "config_updated", RadarConfigs.config_payload(@device_type, config))
     {:noreply, socket}
   end
+
+  def handle_info({:config_updated, _config}, socket), do: {:noreply, socket}
 
   defp uploader_log_message(%{"message" => message}), do: message
   defp uploader_log_message(%{"line" => message}), do: message

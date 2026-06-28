@@ -3,7 +3,10 @@ defmodule Radar.RadarConfig do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @device_types ~w(rd03d ld2451)
+
   schema "radar_configs" do
+    field :device_type, :string
     field :authorized_speed, :integer, default: 25
     field :min_dist, :integer, default: 0
     field :max_dist, :integer, default: 10_000
@@ -14,9 +17,12 @@ defmodule Radar.RadarConfig do
     timestamps()
   end
 
+  def supported_device_types, do: @device_types
+
   def changeset(config, attrs) do
     config
     |> cast(attrs, [
+      :device_type,
       :authorized_speed,
       :min_dist,
       :max_dist,
@@ -25,6 +31,7 @@ defmodule Radar.RadarConfig do
       :capture_paused
     ])
     |> validate_required([
+      :device_type,
       :authorized_speed,
       :min_dist,
       :max_dist,
@@ -32,12 +39,14 @@ defmodule Radar.RadarConfig do
       :aperture_angle,
       :capture_paused
     ])
+    |> validate_inclusion(:device_type, @device_types)
     |> validate_number(:authorized_speed, greater_than: 0)
     |> validate_number(:min_dist, greater_than_or_equal_to: 0)
     |> validate_number(:max_dist, greater_than: 0)
     |> validate_number(:trigger_cooldown, greater_than_or_equal_to: 0)
     |> validate_number(:aperture_angle, greater_than: 0, less_than_or_equal_to: 180)
     |> validate_distance_order()
+    |> unique_constraint(:device_type)
   end
 
   defp validate_distance_order(changeset) do

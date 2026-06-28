@@ -5,6 +5,8 @@ defmodule RadarWeb.Api.PhotoController do
 
   alias Radar.{Infractions, Photos, RadarConfigs}
 
+  @device_type "rd03d"
+
   def create(conn, params) do
     case authenticate_api_key(conn) do
       {:ok, _key} ->
@@ -66,7 +68,7 @@ defmodule RadarWeb.Api.PhotoController do
   end
 
   defp ensure_capture_active do
-    if RadarConfigs.get_config!().capture_paused do
+    if RadarConfigs.get_config!(@device_type).capture_paused do
       {:error, "Radar capture is paused"}
     else
       :ok

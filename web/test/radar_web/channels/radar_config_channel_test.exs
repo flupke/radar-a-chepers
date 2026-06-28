@@ -6,6 +6,7 @@ defmodule RadarWeb.RadarConfigChannelTest do
   alias RadarWeb.Presence
 
   @uploader_debug_topic "uploader_debug"
+  @device_type "rd03d"
 
   setup do
     Radar.RadarData.clear()
@@ -27,7 +28,7 @@ defmodule RadarWeb.RadarConfigChannelTest do
              Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
              |> subscribe_and_join(RadarConfigChannel, "radar:config")
 
-    assert {:ok, _config} = RadarConfigs.update_config(%{capture_paused: true})
+    assert {:ok, _config} = RadarConfigs.update_config(@device_type, %{capture_paused: true})
 
     assert_push "config_updated", %{capture_paused: true}
   end
@@ -47,7 +48,7 @@ defmodule RadarWeb.RadarConfigChannelTest do
              Phoenix.ChannelTest.socket(RadarWeb.UploaderSocket, "uploader_socket", %{})
              |> subscribe_and_join(RadarConfigChannel, "radar:config")
 
-    assert {:ok, _config} = RadarConfigs.update_config(%{capture_paused: true})
+    assert {:ok, _config} = RadarConfigs.update_config(@device_type, %{capture_paused: true})
     Phoenix.PubSub.subscribe(Radar.PubSub, "radar_data")
 
     push(socket, "target_data", %{"x" => 1, "y" => 2})
