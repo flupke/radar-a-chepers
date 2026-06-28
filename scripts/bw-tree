@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_ID="${1:-}"
+
+if [ -z "$ROOT_ID" ]; then
+  echo "usage: scripts/bw-tree <epic-id>" >&2
+  exit 2
+fi
+
+if ! command -v bw >/dev/null 2>&1; then
+  echo "error: bw is required" >&2
+  exit 1
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required" >&2
+  exit 1
+fi
+
+bw export | jq -rs --arg root "$ROOT_ID" '
+  def status_icon($status):
+    if $status == "closed" then "✓"
+    elif $status == "in_progress" then "◐"
+    elif $status == "deferred" then "⏸"
+    else "○"
+    end;
+
+  def priority($issue):
+    "P" + (($issue.priority // 2) | tostring);
+
+  def issue_line($issue):
+    "\(status_icon($issue.status)) \($issue.id) \(priority($issue)) \($issue.title)";
+
+  def parent_id($issue):
+    ($issue.dependencies // [])
+    | map(select(.type == "parent-child"))
+    | .[0].depends_on_id // null;
+
+  def child_ids($issues; $parent):
+    $issues
+    | map(select(parent_id(.) == $parent))
+    | map(.id);
+
+  def in_children($children; $id):
+    $children | index($id) != null;
+
+  def blocked_by_children($children; $issue):
+    ($issue.blocked_by // []) | map(select(in_children($children; .)));
+
+  def blocked_children($by_id; $children; $issue):
+    ($issue.blocks // [])
+    | map(select(in_children($children; .)))
+    | sort_by(. as $id | ($by_id[$id].priority // 2), $id);
+
+  def tree($by_id; $children; $id; $prefix; $is_last):
+    ($by_id[$id]) as $issue
+    | ($prefix + (if $is_last then "└─ " else "├─ " end) + issue_line($issue)),
+      (blocked_children($by_id; $children; $issue) as $next
+       | $next
+       | to_entries[]
+       | tree($by_id; $children; .value; $prefix + (if $is_last then "   " else "│  " end); .key == (($next | length) - 1)));
+
+  . as $issues
+  | (map({key: .id, value: .}) | from_entries) as $by_id
+  | if ($by_id[$root] == null) then
+      error("unknown issue: " + $root)
+    else
+      (child_ids($issues; $root)) as $children
+      | ($by_id[$root] | issue_line(.)),
+        (
+          $children
+          | map(select(blocked_by_children($children; $by_id[.]) | length == 0))
+          | sort_by(. as $id | ($by_id[$id].priority // 2), $id)
+        ) as $roots
+      | $roots
+      | to_entries[]
+      | tree($by_id; $children; .value; ""; .key == (($roots | length) - 1))
+    end
+'
