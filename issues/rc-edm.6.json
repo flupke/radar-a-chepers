@@ -3,7 +3,7 @@
   "blocked_by": [],
   "blocks": [],
   "created": "2026-06-28T08:53:42Z",
-  "description": "Uploader track. Require each uploader connection to declare exactly one radar device type, rd03d or ld2451, plus test_mode metadata. Add a --radar-device CLI option required for real and --test-mode runs; fake uploader must emulate the selected real device type, not a separate fake device. Implement the fixed channel contract: after joining radar:config, send register_device with {device_type, test_mode}; then call get_config. Treat device_not_registered or device_already_connected replies as clear reconnect/log errors.",
+  "description": "uploader: Require each uploader connection to declare exactly one radar device type, rd03d or ld2451, plus test_mode metadata. Add a --radar-device CLI option required for real and --test-mode runs; fake uploader must emulate the selected real device type, not a separate fake device. Implement the fixed channel contract: after joining radar:config, send register_device with {device_type, test_mode}; then call get_config. Treat device_not_registered or device_already_connected replies as clear reconnect/log errors.",
   "id": "rc-edm.6",
   "labels": [
     "track:uploader"
@@ -13,5 +13,5 @@
   "status": "open",
   "title": "Add uploader radar device handshake",
   "type": "task",
-  "updated_at": "2026-06-28T08:59:08Z"
+  "updated_at": "2026-06-28T09:15:27Z"
 }
