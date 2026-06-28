@@ -10,11 +10,13 @@
   "created": "2026-06-28T08:53:42Z",
   "description": "Web track. Implement radar:config channel semantics around one active radar at a time using the fixed contract: uploader sends register_device with {device_type, test_mode} after join; get_config before registration returns device_not_registered; a second registered uploader is rejected with device_already_connected. Serve and push config only for the registered device_type, include device_type in config_updated payloads, and broadcast updates to the uploader only when they match the active device. This task should be implementable in parallel with the uploader client task against that contract.",
   "id": "rc-edm.8",
-  "labels": [],
+  "labels": [
+    "track:web"
+  ],
   "parent": "rc-edm",
   "priority": 1,
   "status": "open",
   "title": "Route config channel by single active radar device",
   "type": "task",
-  "updated_at": "2026-06-28T08:58:37Z"
+  "updated_at": "2026-06-28T08:59:08Z"
 }
