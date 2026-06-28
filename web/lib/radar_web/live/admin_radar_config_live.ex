@@ -9,6 +9,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   @max_uploader_logs 100
   @uploader_debug_topic "uploader_debug"
+  @device_type "rd03d"
 
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -19,11 +20,12 @@ defmodule RadarWeb.AdminRadarConfigLive do
       Phoenix.PubSub.subscribe(Radar.PubSub, Presence.uploader_topic())
     end
 
-    config = RadarConfigs.get_config!()
+    config = RadarConfigs.get_config!(@device_type)
     last_target = last_known_target()
 
     socket =
       socket
+      |> assign(:device_type, @device_type)
       |> assign(:config, config)
       |> assign(:form, config_to_form(config))
       |> assign(:infraction_count, Infractions.count_infractions())
@@ -122,7 +124,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
               id="radar-canvas"
               phx-hook=".RadarCanvas"
               phx-update="ignore"
-              data-radar-config={Jason.encode!(RadarConfigs.config_payload(@config))}
+              data-radar-config={Jason.encode!(RadarConfigs.config_payload(@device_type, @config))}
               width="600"
               height="400"
               class="w-full rounded-lg"
@@ -353,7 +355,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
   def handle_event("update_config", %{"config" => params}, socket) do
     db_params = form_params_to_db(params)
 
-    case RadarConfigs.update_config(db_params) do
+    case RadarConfigs.update_config(@device_type, db_params) do
       {:ok, config} ->
         {:noreply,
          socket
@@ -367,7 +369,9 @@ defmodule RadarWeb.AdminRadarConfigLive do
   end
 
   def handle_event("toggle_capture", _params, socket) do
-    case RadarConfigs.update_config(%{capture_paused: !socket.assigns.config.capture_paused}) do
+    case RadarConfigs.update_config(@device_type, %{
+           capture_paused: !socket.assigns.config.capture_paused
+         }) do
       {:ok, config} ->
         {:noreply,
          socket
@@ -380,13 +384,15 @@ defmodule RadarWeb.AdminRadarConfigLive do
     end
   end
 
-  def handle_info({:config_updated, config}, socket) do
+  def handle_info({:config_updated, %{device_type: @device_type} = config}, socket) do
     {:noreply,
      socket
      |> assign(:config, config)
      |> assign(:form, config_to_form(config))
      |> push_config_event(config)}
   end
+
+  def handle_info({:config_updated, _config}, socket), do: {:noreply, socket}
 
   def handle_info({:new_infraction, _infraction}, socket) do
     {:noreply, assign(socket, :infraction_count, Infractions.count_infractions())}
@@ -635,7 +641,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
   end
 
   defp push_config_event(socket, config) do
-    push_event(socket, "radar_config", RadarConfigs.config_payload(config))
+    push_event(socket, "radar_config", RadarConfigs.config_payload(@device_type, config))
   end
 
   defp parse_float(val) when is_binary(val) do

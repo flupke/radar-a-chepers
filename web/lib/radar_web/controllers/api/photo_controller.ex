@@ -32,8 +32,11 @@ defmodule RadarWeb.Api.PhotoController do
     end
   end
 
-  defp handle_photo_upload(conn, %{"photo" => photo_upload, "infraction" => infraction_data}) do
-    with :ok <- ensure_capture_active(),
+  defp handle_photo_upload(
+         conn,
+         %{"photo" => photo_upload, "infraction" => infraction_data} = params
+       ) do
+    with :ok <- ensure_capture_active(params["device_type"]),
          {:ok, decoded_infraction} <- decode_infraction_data(infraction_data),
          {:ok, file_data} <- read_upload_file(photo_upload),
          {:ok, photo} <- create_photo_with_infraction(photo_upload, file_data, decoded_infraction) do
@@ -65,11 +68,16 @@ defmodule RadarWeb.Api.PhotoController do
     |> json(%{error: "Missing photo or infraction data"})
   end
 
-  defp ensure_capture_active do
-    if RadarConfigs.get_config!().capture_paused do
-      {:error, "Radar capture is paused"}
-    else
-      :ok
+  defp ensure_capture_active(device_type) do
+    cond do
+      device_type not in RadarConfigs.supported_device_types() ->
+        {:error, "A supported device_type is required"}
+
+      RadarConfigs.get_config!(device_type).capture_paused ->
+        {:error, "Radar capture is paused"}
+
+      true ->
+        :ok
     end
   end
 

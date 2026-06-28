@@ -47,16 +47,20 @@ deploy: ## Deploy to Fly.io
 console: ## Open a remote IEx console on Fly
 	fly ssh console --app $(FLY_APP) -C "/app/bin/radar remote"
 
+RADAR_DEVICE ?= rd03d
+
 .PHONY: fly-seed
 fly-seed: ## Push seed data to Fly.io via the API
 	mix radar.fly_seed \
 		--url https://$(FLY_APP).fly.dev \
+		--radar-device $(RADAR_DEVICE) \
 		--api-key $$(fly ssh console --app $(FLY_APP) -C "printenv RADAR_API_KEY" -q)
 
 .PHONY: fly-seed-rs
 fly-seed-rs: ## Push seed data to Fly.io via the Rust uploader pipeline
 	cd ../uploader && cargo run --bin seed -- \
 		--api-endpoint https://$(FLY_APP).fly.dev \
+		--radar-device $(RADAR_DEVICE) \
 		--api-key $$(fly ssh console --app $(FLY_APP) -C "printenv RADAR_API_KEY" -q)
 
 .PHONY: fly-unseed
