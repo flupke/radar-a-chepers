@@ -7,7 +7,7 @@
     "rc-edm.2"
   ],
   "created": "2026-06-28T08:40:08Z",
-  "description": "Radar track. Add Cargo features for rd03d and ld2451, defaulting to rd03d. Compile exactly one radar module variant and fail compilation if both or neither are selected. Keep install/start workflows working with the default feature.",
+  "description": "radar: Add Cargo features for rd03d and ld2451, defaulting to rd03d. Compile exactly one radar module variant and fail compilation if both or neither are selected. Keep install/start workflows working with the default feature.",
   "id": "rc-edm.3",
   "labels": [
     "track:radar"
@@ -17,5 +17,5 @@
   "status": "open",
   "title": "Add build-time radar module selection",
   "type": "task",
-  "updated_at": "2026-06-28T08:59:06Z"
+  "updated_at": "2026-06-28T09:14:59Z"
 }
