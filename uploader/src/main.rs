@@ -5,7 +5,7 @@ use tokio::sync::broadcast;
 
 use uploader::{
     actor::Actor,
-    config_channel,
+    config_channel::{self, RadarDeviceType},
     fake_radar_reader::FakeRadarReader,
     infraction_recorder::{InfractionRecorder, InfractionRecorderCommand},
     infraction_uploader::InfractionUploader,
@@ -30,6 +30,9 @@ struct Args {
 
     #[arg(long)]
     elf_path: Option<Utf8PathBuf>,
+
+    #[arg(long, value_enum)]
+    radar_device: RadarDeviceType,
 
     #[arg(short, long)]
     infractions_dir: Utf8PathBuf,
@@ -86,11 +89,14 @@ async fn main() -> Result<()> {
     let api_endpoint = args.api_endpoint.clone();
     let api_key = args.api_key.clone();
     let test_mode = args.test_mode;
+    let radar_device = args.radar_device;
 
     // Spawn config channel on a regular tokio task (needs Send)
     tokio::spawn(config_channel::run(
         api_endpoint,
         api_key,
+        radar_device,
+        test_mode,
         config_tx,
         target_data_rx,
         uploader_log_rx,
@@ -149,4 +155,65 @@ async fn main() -> Result<()> {
         .await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::error::ErrorKind;
+
+    use super::*;
+
+    fn required_args() -> Vec<&'static str> {
+        vec![
+            "uploader",
+            "--api-endpoint",
+            "http://localhost:4000",
+            "--api-key",
+            "secret",
+            "--infractions-dir",
+            "/tmp/infractions",
+        ]
+    }
+
+    #[test]
+    fn radar_device_is_required_in_test_mode() {
+        let mut args = required_args();
+        args.push("--test-mode");
+
+        let err = Args::try_parse_from(args).unwrap_err();
+
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn parses_rd03d_radar_device() {
+        let mut args = required_args();
+        args.extend(["--radar-device", "rd03d", "--test-mode"]);
+
+        let args = Args::try_parse_from(args).unwrap();
+
+        assert_eq!(args.radar_device, RadarDeviceType::Rd03d);
+        assert!(args.test_mode);
+    }
+
+    #[test]
+    fn parses_ld2451_radar_device() {
+        let mut args = required_args();
+        args.extend(["--radar-device", "ld2451", "--test-mode"]);
+
+        let args = Args::try_parse_from(args).unwrap();
+
+        assert_eq!(args.radar_device, RadarDeviceType::Ld2451);
+        assert!(args.test_mode);
+    }
+
+    #[test]
+    fn rejects_unknown_radar_device() {
+        let mut args = required_args();
+        args.extend(["--radar-device", "fake", "--test-mode"]);
+
+        let err = Args::try_parse_from(args).unwrap_err();
+
+        assert_eq!(err.kind(), ErrorKind::InvalidValue);
+    }
 }
