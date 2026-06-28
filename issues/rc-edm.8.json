@@ -1,7 +1,6 @@
 {
   "assignee": "",
   "blocked_by": [
-    "rc-edm.6",
     "rc-edm.7"
   ],
   "blocks": [
@@ -17,5 +16,5 @@
   "status": "open",
   "title": "Route config channel by single active radar device",
   "type": "task",
-  "updated_at": "2026-06-28T08:53:52Z"
+  "updated_at": "2026-06-28T08:58:27Z"
 }
