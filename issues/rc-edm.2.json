@@ -13,9 +13,15 @@
     "track:radar"
   ],
   "parent": "rc-edm",
+  "comments": [
+    {
+      "text": "Implementation attempt found no local LD2451 UART captures or authoritative protocol notes. Added docs-only capture/protocol notes in the rc-edm.2 workspace, but full fixture coverage is blocked until real LD2451 UART captures or an authoritative protocol document are available. Do not close this task or start rc-edm.4 from it until that data exists.",
+      "timestamp": "2026-06-28T10:21:19Z"
+    }
+  ],
   "priority": 1,
   "status": "in_progress",
   "title": "radar: Add LD2451 protocol capture fixtures",
   "type": "task",
-  "updated_at": "2026-06-28T10:10:20Z"
+  "updated_at": "2026-06-28T10:21:19Z"
 }
