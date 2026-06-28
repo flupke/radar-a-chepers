@@ -5,6 +5,7 @@
     "rc-edm.7"
   ],
   "blocks": [
+    "rc-edm.10",
     "rc-edm.9"
   ],
   "created": "2026-06-28T08:53:42Z",
@@ -16,5 +17,5 @@
   "status": "open",
   "title": "Route config channel by single active radar device",
   "type": "task",
-  "updated_at": "2026-06-28T08:53:51Z"
+  "updated_at": "2026-06-28T08:53:52Z"
 }
