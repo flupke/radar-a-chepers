@@ -15,7 +15,7 @@
   "parent": "rc-edm",
   "priority": 1,
   "status": "open",
-  "title": "Add LD2451 protocol capture fixtures",
+  "title": "radar: Add LD2451 protocol capture fixtures",
   "type": "task",
-  "updated_at": "2026-06-28T09:14:59Z"
+  "updated_at": "2026-06-28T09:16:02Z"
 }
