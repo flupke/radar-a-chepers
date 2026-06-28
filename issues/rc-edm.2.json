@@ -3,7 +3,9 @@
   "blocked_by": [
     "rc-edm.3"
   ],
-  "blocks": [],
+  "blocks": [
+    "rc-edm.4"
+  ],
   "created": "2026-06-28T08:40:08Z",
   "description": "Capture representative LD2451 UART bytes for empty frame, one target, multiple targets if supported, malformed/noisy stream, and trigger-worthy motion. Save fixtures or protocol notes in the repo, including baud rate, pins, frame shape, coordinate units, speed units/sign, and required initialization.",
   "id": "rc-edm.2",
