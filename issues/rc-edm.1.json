@@ -13,7 +13,7 @@
   "parent": "rc-edm",
   "priority": 2,
   "status": "open",
-  "title": "Extract ESP radar module interface",
+  "title": "radar: Extract ESP radar module interface",
   "type": "task",
-  "updated_at": "2026-06-28T09:14:59Z"
+  "updated_at": "2026-06-28T09:16:02Z"
 }
