@@ -5,7 +5,7 @@
   ],
   "blocks": [],
   "created": "2026-06-28T08:40:08Z",
-  "description": "Build and flash with the LD2451 feature. Verify passive probe sees frames, CONFIG over Pi-to-ESP UART still works, GPIO42 pulses on valid trigger, and uploader/web still receive target/debug events. Update docs/workflows.md with LD2451 build/run commands and hardware assumptions.",
+  "description": "Radar track. Build and flash with the LD2451 feature. Verify passive probe sees frames, CONFIG over Pi-to-ESP UART still works, GPIO42 pulses on valid trigger, and uploader/web still receive target/debug events. Update docs/workflows.md with LD2451 build/run commands and hardware assumptions.",
   "id": "rc-edm.5",
   "labels": [],
   "parent": "rc-edm",
@@ -13,5 +13,5 @@
   "status": "open",
   "title": "Validate LD2451 on ESP hardware",
   "type": "task",
-  "updated_at": "2026-06-28T08:41:30Z"
+  "updated_at": "2026-06-28T08:58:50Z"
 }
