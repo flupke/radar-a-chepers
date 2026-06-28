@@ -16,7 +16,7 @@
   "parent": "rc-edm",
   "priority": 1,
   "status": "open",
-  "title": "Route config channel by single active radar device",
+  "title": "web: Route config channel by single active radar device",
   "type": "task",
-  "updated_at": "2026-06-28T09:15:27Z"
+  "updated_at": "2026-06-28T09:16:14Z"
 }
