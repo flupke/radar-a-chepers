@@ -13,7 +13,7 @@
   "parent": "rc-edm",
   "priority": 1,
   "status": "open",
-  "title": "Validate LD2451 on ESP hardware",
+  "title": "radar: Validate LD2451 on ESP hardware",
   "type": "task",
-  "updated_at": "2026-06-28T09:14:59Z"
+  "updated_at": "2026-06-28T09:16:02Z"
 }
