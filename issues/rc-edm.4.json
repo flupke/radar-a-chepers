@@ -9,11 +9,13 @@
   "created": "2026-06-28T08:40:08Z",
   "description": "Radar track. Add an ld2451 radar module implementation using the shared ESP radar interface. Convert LD2451 targets into the existing uploader contract: raw speed in cm/s plus x/y in mm. Keep RD03-D sentinel logic module-specific and add LD2451-specific raw-frame diagnostics.",
   "id": "rc-edm.4",
-  "labels": [],
+  "labels": [
+    "track:radar"
+  ],
   "parent": "rc-edm",
   "priority": 1,
   "status": "open",
   "title": "Implement LD2451 parser and init path",
   "type": "task",
-  "updated_at": "2026-06-28T08:58:50Z"
+  "updated_at": "2026-06-28T08:59:06Z"
 }
