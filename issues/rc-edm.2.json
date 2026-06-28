@@ -1,5 +1,5 @@
 {
-  "assignee": "",
+  "assignee": "Luper Rouch",
   "blocked_by": [
     "rc-edm.3"
   ],
@@ -14,8 +14,8 @@
   ],
   "parent": "rc-edm",
   "priority": 1,
-  "status": "open",
+  "status": "in_progress",
   "title": "radar: Add LD2451 protocol capture fixtures",
   "type": "task",
-  "updated_at": "2026-06-28T09:16:02Z"
+  "updated_at": "2026-06-28T10:10:20Z"
 }
