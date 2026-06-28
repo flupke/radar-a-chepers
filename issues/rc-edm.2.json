@@ -10,6 +10,7 @@
   "description": "radar: Capture representative LD2451 UART bytes for empty frame, one target, multiple targets if supported, malformed/noisy stream, and trigger-worthy motion. Save fixtures or protocol notes in the repo, including baud rate, pins, frame shape, coordinate units, speed units/sign, and required initialization.",
   "id": "rc-edm.2",
   "labels": [
+    "blocked:hardware-data",
     "track:radar"
   ],
   "parent": "rc-edm",
@@ -23,5 +24,5 @@
   "status": "in_progress",
   "title": "radar: Add LD2451 protocol capture fixtures",
   "type": "task",
-  "updated_at": "2026-06-28T10:21:19Z"
+  "updated_at": "2026-06-28T10:21:50Z"
 }
