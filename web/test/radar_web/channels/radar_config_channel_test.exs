@@ -110,8 +110,16 @@ defmodule RadarWeb.RadarConfigChannelTest do
 
     push(socket, "target_data", %{"x" => 1, "y" => 2})
 
-    assert_receive {:target_data, %{"x" => 1, "y" => 2}}
-    assert Radar.RadarData.last_target() == %{"x" => 1, "y" => 2}
+    assert_receive {:target_data, payload}
+
+    assert Map.take(payload, ["x", "y", "device_type", "test_mode"]) == %{
+             "x" => 1,
+             "y" => 2,
+             "device_type" => @rd03d,
+             "test_mode" => false
+           }
+
+    assert Radar.RadarData.last_target() == payload
   end
 
   test "tracks registered uploader devices" do
