@@ -5,7 +5,7 @@
     "rc-edm.8"
   ],
   "created": "2026-06-28T08:53:42Z",
-  "description": "Web track. Change web radar configuration storage from singleton semantics to explicit per-device rows keyed by device_type. Migrate the existing row to rd03d, seed defaults for rd03d and ld2451, add a unique constraint on device_type, and expose context APIs that always require a device_type for get/update/payload operations. Do not add fallback lookup or implicit rd03d behavior.",
+  "description": "web: Change web radar configuration storage from singleton semantics to explicit per-device rows keyed by device_type. Migrate the existing row to rd03d, seed defaults for rd03d and ld2451, add a unique constraint on device_type, and expose context APIs that always require a device_type for get/update/payload operations. Do not add fallback lookup or implicit rd03d behavior.",
   "id": "rc-edm.7",
   "labels": [
     "track:web"
@@ -15,5 +15,5 @@
   "status": "open",
   "title": "Persist radar config per device",
   "type": "task",
-  "updated_at": "2026-06-28T08:59:08Z"
+  "updated_at": "2026-06-28T09:15:27Z"
 }
