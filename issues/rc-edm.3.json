@@ -6,6 +6,7 @@
   "blocks": [
     "rc-edm.2"
   ],
+  "closed_at": "2026-06-28T10:08:06Z",
   "created": "2026-06-28T08:40:08Z",
   "description": "radar: Add Cargo features for rd03d and ld2451, defaulting to rd03d. Compile exactly one radar module variant and fail compilation if both or neither are selected. Keep install/start workflows working with the default feature.",
   "id": "rc-edm.3",
@@ -14,8 +15,8 @@
   ],
   "parent": "rc-edm",
   "priority": 2,
-  "status": "in_progress",
+  "status": "closed",
   "title": "radar: Add build-time radar module selection",
   "type": "task",
-  "updated_at": "2026-06-28T09:44:15Z"
+  "updated_at": "2026-06-28T10:08:06Z"
 }
