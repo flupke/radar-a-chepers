@@ -11,7 +11,7 @@
   "parent": "rc-edm",
   "priority": 1,
   "status": "open",
-  "title": "Add uploader radar device handshake",
+  "title": "uploader: Add radar device handshake",
   "type": "task",
-  "updated_at": "2026-06-28T09:15:27Z"
+  "updated_at": "2026-06-28T09:16:14Z"
 }
