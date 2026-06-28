@@ -1,0 +1,15 @@
+{
+  "assignee": "",
+  "blocked_by": [],
+  "blocks": [],
+  "created": "2026-06-28T08:39:58Z",
+  "description": "Refactor the ESP firmware so RD03-D parsing/init is behind a small radar module interface. Keep uploader event lines unchanged: EVENTS: TARGET: \u003craw_speed_cm_s\u003e \u003cx_mm\u003e \u003cy_mm\u003e and EVENTS: TRIGGER: ... Preserve RD03-D trigger behavior including suspicious 248/256 cm/s handling.",
+  "id": "rc-edm.1",
+  "labels": [],
+  "parent": "rc-edm",
+  "priority": 2,
+  "status": "open",
+  "title": "Extract ESP radar module interface",
+  "type": "task",
+  "updated_at": "2026-06-28T08:39:58Z"
+}
