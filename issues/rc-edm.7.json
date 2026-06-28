@@ -13,7 +13,7 @@
   "parent": "rc-edm",
   "priority": 1,
   "status": "open",
-  "title": "Persist radar config per device",
+  "title": "web: Persist radar config per device",
   "type": "task",
-  "updated_at": "2026-06-28T09:15:27Z"
+  "updated_at": "2026-06-28T09:16:14Z"
 }
