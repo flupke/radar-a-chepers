@@ -3,7 +3,9 @@
   "blocked_by": [
     "rc-edm.2"
   ],
-  "blocks": [],
+  "blocks": [
+    "rc-edm.5"
+  ],
   "created": "2026-06-28T08:40:08Z",
   "description": "Add an ld2451 radar module implementation using the shared ESP radar interface. Convert LD2451 targets into the existing uploader contract: raw speed in cm/s plus x/y in mm. Keep RD03-D sentinel logic module-specific and add LD2451-specific raw-frame diagnostics.",
   "id": "rc-edm.4",
