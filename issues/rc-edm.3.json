@@ -15,7 +15,7 @@
   "parent": "rc-edm",
   "priority": 2,
   "status": "open",
-  "title": "Add build-time radar module selection",
+  "title": "radar: Add build-time radar module selection",
   "type": "task",
-  "updated_at": "2026-06-28T09:14:59Z"
+  "updated_at": "2026-06-28T09:16:02Z"
 }
