@@ -69,6 +69,8 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("#uploader-connected", "Yes")
     |> assert_has("#active-device-status", "LD2451")
     |> assert_has("#active-device-status", "Test mode")
+    |> assert_has("#uploader-device", "LD2451")
+    |> assert_has("#uploader-device", "Test mode")
     |> assert_has("#device-config-selector .btn-primary", "LD2451")
   end
 
@@ -122,7 +124,60 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("#last-target", "3 km/h")
     |> assert_has("#last-target", "83 cm/s")
     |> assert_has("#last-target", "Over speed")
-    |> assert_has("#last-target", "RD03-D sentinel")
+    |> assert_has("#last-target", "RD03-D")
+    |> assert_has("#last-target", "Speed sentinel")
+    |> assert_has("#last-target", "Detected")
+  end
+
+  test "shows active device diagnostics while switching stored config tabs", %{conn: conn} do
+    track_active_device(@ld2451, true)
+
+    session =
+      conn
+      |> log_in_admin()
+      |> visit(~p"/admin")
+      |> assert_has("#uploader-device", "LD2451")
+      |> assert_has("#uploader-device", "Test mode")
+
+    Phoenix.PubSub.broadcast(Radar.PubSub, "radar_data", {
+      :target_data,
+      %{
+        "raw_speed_cm_s" => 140,
+        "x" => 100,
+        "y" => 2000,
+        "speed" => 5,
+        "distance" => 2100,
+        "angle" => 2.9,
+        "in_range" => true,
+        "in_aperture" => true,
+        "over_speed" => false,
+        "suspicious_speed" => false,
+        "cooldown_elapsed" => true,
+        "capture_paused" => false,
+        "capture_in_progress" => false,
+        "would_trigger" => false,
+        "triggered" => false
+      }
+    })
+
+    session =
+      session
+      |> assert_has("#last-target", "LD2451")
+      |> assert_has("#last-target", "Test mode")
+      |> assert_has("#last-target", "Radar diagnostic")
+      |> assert_has("#last-target", "Normal")
+      |> unwrap(fn view ->
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-value-device='rd03d']")
+        |> Phoenix.LiveViewTest.render_click()
+      end)
+
+    session
+    |> assert_has("#device-config-selector .btn-primary", "RD03-D")
+    |> assert_has("#last-target", "LD2451")
+    |> assert_has("#last-target", "Test mode")
+    |> assert_has("#last-target", "Radar diagnostic")
+    |> assert_has("#last-target", "Normal")
   end
 
   test "persists radar configuration changes and restores canvas limits after reload", %{
