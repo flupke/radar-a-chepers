@@ -5,10 +5,12 @@ defmodule RadarWeb.AdminLiveTest do
   import Radar.PhotosFixtures
 
   alias Radar.{RadarConfigs, Repo}
+  alias RadarWeb.ActiveRadar
   alias RadarWeb.Presence
 
   @uploader_debug_topic "uploader_debug"
-  @device_type "rd03d"
+  @rd03d "rd03d"
+  @ld2451 "ld2451"
 
   setup do
     Repo.delete_all(Radar.Infraction)
@@ -28,6 +30,9 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("h2", "Live Radar Data")
     |> assert_has("h2", "Uploader Status")
     |> assert_has("#uploader-connected", "No")
+    |> assert_has("#active-device-status", "No device connected")
+    |> assert_has("#device-config-selector", "RD03-D")
+    |> assert_has("#device-config-selector", "LD2451")
     |> assert_has("#radar-canvas")
     |> assert_has("#last-target", "No targets yet.")
   end
@@ -53,18 +58,18 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("#uploader-connected", "Yes")
   end
 
-  test "shows uploader connected when the uploader joined before the admin page mounted", %{
+  test "shows active uploader device when it registered before the admin page mounted", %{
     conn: conn
   } do
-    uploader_pid = self()
-
-    {:ok, _ref} = Presence.track_uploader(uploader_pid)
-    on_exit(fn -> Presence.untrack_uploader(uploader_pid) end)
+    track_active_device(@ld2451, true)
 
     conn
     |> log_in_admin()
     |> visit(~p"/admin")
     |> assert_has("#uploader-connected", "Yes")
+    |> assert_has("#active-device-status", "LD2451")
+    |> assert_has("#active-device-status", "Test mode")
+    |> assert_has("#device-config-selector .btn-primary", "LD2451")
   end
 
   test "marks uploader connected when logs arrive", %{conn: conn} do
@@ -141,7 +146,7 @@ defmodule RadarWeb.AdminLiveTest do
         |> Phoenix.LiveViewTest.render_change()
       end)
 
-    config = RadarConfigs.get_config!(@device_type)
+    config = RadarConfigs.get_config!(@rd03d)
 
     assert config.authorized_speed == 55
     assert config.min_dist == 6500
@@ -160,6 +165,49 @@ defmodule RadarWeb.AdminLiveTest do
     |> assert_has("#radar-canvas[data-radar-config]")
   end
 
+  test "loads and saves the selected device configuration", %{conn: conn} do
+    params = %{
+      "authorized_speed" => "35",
+      "min_dist" => "1.5",
+      "max_dist" => "8.0",
+      "trigger_cooldown" => "1.8",
+      "aperture_angle" => "110"
+    }
+
+    session =
+      conn
+      |> log_in_admin()
+      |> visit(~p"/admin")
+      |> unwrap(fn view ->
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-value-device='ld2451']")
+        |> Phoenix.LiveViewTest.render_click()
+
+        view
+        |> Phoenix.LiveViewTest.form("form", config: params)
+        |> Phoenix.LiveViewTest.render_change()
+      end)
+
+    ld2451_config = RadarConfigs.get_config!(@ld2451)
+    rd03d_config = RadarConfigs.get_config!(@rd03d)
+
+    assert ld2451_config.authorized_speed == 35
+    assert ld2451_config.min_dist == 1500
+    assert ld2451_config.max_dist == 8000
+    assert ld2451_config.trigger_cooldown == 1800
+    assert ld2451_config.aperture_angle == 110
+
+    assert rd03d_config.authorized_speed == 25
+    assert rd03d_config.min_dist == 0
+    assert rd03d_config.max_dist == 10_000
+
+    session
+    |> assert_has("#device-config-selector .btn-primary", "LD2451")
+    |> assert_has("output", "1.5 m")
+    |> assert_has("output", "8.0 m")
+    |> assert_has("output", "110 degrees")
+  end
+
   test "pauses and resumes camera capture from radar configuration", %{conn: conn} do
     session =
       conn
@@ -168,7 +216,7 @@ defmodule RadarWeb.AdminLiveTest do
       |> assert_has("p", "Camera capture is active.")
       |> assert_has("button[aria-pressed='false']", "Pause radar")
 
-    assert RadarConfigs.config_payload(@device_type).capture_paused == false
+    assert RadarConfigs.config_payload(@rd03d).capture_paused == false
 
     session =
       session
@@ -176,14 +224,14 @@ defmodule RadarWeb.AdminLiveTest do
       |> assert_has("p", "Camera capture is paused.")
       |> assert_has("button[aria-pressed='true']", "Resume radar")
 
-    assert RadarConfigs.config_payload(@device_type).capture_paused == true
+    assert RadarConfigs.config_payload(@rd03d).capture_paused == true
 
     session
     |> click_button("Resume radar")
     |> assert_has("p", "Camera capture is active.")
     |> assert_has("button[aria-pressed='false']", "Pause radar")
 
-    assert RadarConfigs.config_payload(@device_type).capture_paused == false
+    assert RadarConfigs.config_payload(@rd03d).capture_paused == false
   end
 
   test "lists infractions with individual photo links and a reliable page archive", %{conn: conn} do
@@ -392,5 +440,22 @@ defmodule RadarWeb.AdminLiveTest do
     id
     |> to_string()
     |> String.slice(0, 8)
+  end
+
+  defp track_active_device(device_type, test_mode) do
+    uploader_pid = self()
+
+    {:ok, _ref} =
+      Presence.track_uploader(uploader_pid, %{
+        device_type: device_type,
+        test_mode: test_mode
+      })
+
+    :ok = ActiveRadar.register(uploader_pid, device_type, test_mode)
+
+    on_exit(fn ->
+      Presence.untrack_uploader(uploader_pid)
+      ActiveRadar.unregister(uploader_pid)
+    end)
   end
 end

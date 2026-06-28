@@ -17,10 +17,25 @@ defmodule RadarWeb.ActiveRadar do
     GenServer.call(__MODULE__, {:unregister, pid})
   end
 
+  def current do
+    GenServer.call(__MODULE__, :current)
+  end
+
   @impl true
   def init(_opts), do: {:ok, nil}
 
   @impl true
+  def handle_call(:current, _from, nil), do: {:reply, nil, nil}
+
+  def handle_call(:current, _from, state) do
+    if Process.alive?(state.pid) do
+      {:reply, active_radar(state), state}
+    else
+      Process.demonitor(state.monitor_ref, [:flush])
+      {:reply, nil, nil}
+    end
+  end
+
   def handle_call({:register, pid, device_type, test_mode}, _from, nil) do
     {:reply, :ok, track(pid, device_type, test_mode)}
   end
@@ -60,6 +75,13 @@ defmodule RadarWeb.ActiveRadar do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp active_radar(state) do
+    %{
+      device_type: state.device_type,
+      test_mode: state.test_mode
+    }
+  end
 
   defp track(pid, device_type, test_mode) do
     %__MODULE__{
