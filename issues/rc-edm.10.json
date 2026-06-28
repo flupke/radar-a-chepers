@@ -1,0 +1,15 @@
+{
+  "assignee": "",
+  "blocked_by": [],
+  "blocks": [],
+  "created": "2026-06-28T08:53:42Z",
+  "description": "Make the admin debug area device-aware for the single active radar. Replace hardcoded RD03-D sentinel wording with diagnostics appropriate to the active device, include device_type/test_mode with uploader status and target/debug display, and keep live target canvas/log behavior working while switching stored config tabs.",
+  "id": "rc-edm.10",
+  "labels": [],
+  "parent": "rc-edm",
+  "priority": 2,
+  "status": "open",
+  "title": "Add device-specific radar debug UI",
+  "type": "task",
+  "updated_at": "2026-06-28T08:53:42Z"
+}
