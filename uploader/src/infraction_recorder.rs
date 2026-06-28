@@ -6,6 +6,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::{
     actor::{Actor, ActorPort},
+    config_channel::RadarDeviceType,
     infraction_uploader::{InfractionUploader, InfractionUploaderCommand},
     uploader_logger::UploaderLog,
 };
@@ -96,6 +97,7 @@ impl InfractionRecorder {
         target_data_tx: broadcast::Sender<TargetData>,
         uploader_log_tx: broadcast::Sender<UploaderLog>,
         test_mode: bool,
+        radar_device: RadarDeviceType,
     ) -> Self {
         let (target_tx, target_rx) = watch::channel(None);
         let (trigger_tx, trigger_rx) = mpsc::unbounded_channel();
@@ -114,6 +116,7 @@ impl InfractionRecorder {
                 target_rx,
                 trigger_rx,
                 test_mode,
+                radar_device,
             )
             .start(),
             radar_input,
@@ -148,6 +151,7 @@ struct InfractionRecorderInner {
     target_rx: watch::Receiver<Option<RawTarget>>,
     trigger_rx: mpsc::UnboundedReceiver<RawTarget>,
     test_mode: bool,
+    radar_device: RadarDeviceType,
 }
 
 impl Actor for InfractionRecorderInner {
@@ -220,6 +224,7 @@ impl InfractionRecorderInner {
         target_rx: watch::Receiver<Option<RawTarget>>,
         trigger_rx: mpsc::UnboundedReceiver<RawTarget>,
         test_mode: bool,
+        radar_device: RadarDeviceType,
     ) -> Self {
         Self {
             authorized_speed,
@@ -236,6 +241,7 @@ impl InfractionRecorderInner {
             trigger_rx,
             last_capture_attempt_at: None,
             test_mode,
+            radar_device,
         }
     }
 
@@ -262,7 +268,8 @@ impl InfractionRecorderInner {
             y,
         } = target;
         let raw_speed = raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s);
-        let suspicious_speed = is_suspicious_rd03d_speed(raw_speed_cm_s);
+        let suspicious_speed = self.radar_device == RadarDeviceType::Rd03d
+            && is_suspicious_rd03d_speed(raw_speed_cm_s);
         let speed = effective_speed_kmh(raw_speed, self.authorized_speed, suspicious_speed);
         let distance = ((x as f64).powi(2) + (y as f64).powi(2)).sqrt();
 
@@ -444,6 +451,7 @@ mod tests {
     use super::*;
     use crate::{
         actor::{Actor, ActorPort},
+        config_channel::RadarDeviceType,
         infraction_uploader::InfractionUploaderCommand,
     };
     use tokio::sync::mpsc;
@@ -483,6 +491,7 @@ mod tests {
             target_rx,
             trigger_rx,
             true,
+            RadarDeviceType::Rd03d,
         );
 
         (temp_dir, photos_dir, recorder, target_data_rx)
@@ -504,6 +513,7 @@ mod tests {
             photos_dir.clone(),
             "http://localhost".to_string(),
             "api-key".to_string(),
+            RadarDeviceType::Rd03d,
         );
         let recorder = InfractionRecorder::new(
             authorized_speed,
@@ -512,9 +522,39 @@ mod tests {
             target_data_tx,
             uploader_log_tx,
             true,
+            RadarDeviceType::Rd03d,
         );
 
         (temp_dir, recorder, target_data_rx, uploader_log_rx)
+    }
+
+    #[tokio::test]
+    async fn ld2451_speeds_do_not_use_rd03d_sentinels() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (_temp_dir, photos_dir, mut recorder, mut target_rx) = test_recorder(30);
+                recorder.radar_device = RadarDeviceType::Ld2451;
+
+                for raw_speed_cm_s in [248, 256, -248, -256] {
+                    recorder
+                        .record_trigger(
+                            RawTarget {
+                                raw_speed_cm_s,
+                                x: 0,
+                                y: 1000,
+                            },
+                            None,
+                        )
+                        .unwrap();
+                    let target = target_rx.try_recv().unwrap();
+                    assert_eq!(target.speed, 9);
+                    assert!(!target.suspicious_speed);
+                    assert!(!target.over_speed);
+                    assert!(!target.triggered);
+                }
+                assert!(saved_infractions(&photos_dir).is_empty());
+            })
+            .await;
     }
 
     fn saved_infractions(photos_dir: &Utf8Path) -> Vec<Infraction> {

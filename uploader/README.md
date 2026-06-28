@@ -12,6 +12,7 @@ The uploader is configured via CLI flags:
 - `--serial-port`: The ESP USB serial device used for firmware logs, for example `/dev/ttyACM0`.
 - `--config-serial-port`: The Pi UART device used to send trigger config to the ESP, for example `/dev/serial0`.
 - `--elf-path`: The radar firmware ELF used for defmt decoding.
+- `--radar-device`: Required device identity, `rd03d` or `ld2451`, including in test mode.
 - `--test-mode`: Run with simulated radar data.
 
 ## Raspberry Pi 4 build
@@ -27,5 +28,5 @@ The binary is written to `target/aarch64-unknown-linux-musl/release/uploader` an
 To build and install it over SSH with a systemd service:
 
 ```sh
-../install.sh pi@raspberrypi.local
+../install.sh --radar-device rd03d rshep.local
 ```

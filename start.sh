@@ -15,6 +15,7 @@ LOCAL_API_ENDPOINT="${LOCAL_API_ENDPOINT%/}"
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
 CONFIG_SERIAL_PORT="${CONFIG_SERIAL_PORT:-/dev/serial0}"
 RADAR_BINARY="${RADAR_BINARY:-${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers}"
+RADAR_DEVICE="${RADAR_DEVICE:-}"
 
 SSH_BIN="${SSH_BIN:-ssh}"
 REMOTE_UPLOADER_HOST="${REMOTE_UPLOADER_HOST:-}"
@@ -33,7 +34,7 @@ REMOTE_UPLOADER_STARTED=0
 
 usage() {
   cat <<EOF
-Usage: ./start.sh [--fake-people] [--local-web] [--remote-uploader HOST]
+Usage: ./start.sh --radar-device DEVICE [--fake-people] [--local-web] [--remote-uploader HOST]
 
 By default, starts the uploader in live hardware mode connected to ${FLY_APP_URL}.
 
@@ -42,7 +43,9 @@ Options:
   --local-web             Start the Phoenix web server locally and connect the uploader to it.
   --remote-uploader HOST  With --local-web, run the installed Pi uploader over SSH and
                           point it at this machine's LAN URL.
+  --radar-device DEVICE   Active radar device for this uploader connection: rd03d or ld2451.
   SERIAL_PORT and CONFIG_SERIAL_PORT override the live hardware serial devices.
+  RADAR_DEVICE can also provide --radar-device.
   LOCAL_API_ENDPOINT_LAN overrides the URL given to the remote Pi.
   -h, --help              Show this help.
 EOF
@@ -60,6 +63,23 @@ require_option_value() {
     echo "error: ${option} requires a value" >&2
     exit 1
   fi
+}
+
+validate_radar_device() {
+  if [ -z "$RADAR_DEVICE" ]; then
+    echo "error: --radar-device is required (rd03d or ld2451)" >&2
+    exit 1
+  fi
+
+  case "$RADAR_DEVICE" in
+    rd03d | ld2451)
+      ;;
+    *)
+      echo "error: unsupported radar device: ${RADAR_DEVICE}" >&2
+      echo "       expected one of: rd03d, ld2451" >&2
+      exit 1
+      ;;
+  esac
 }
 
 cleanup() {
@@ -244,6 +264,7 @@ start_uploader() {
     --api-endpoint "$api_endpoint"
     --api-key "$api_key"
     --infractions-dir "$infractions_dir"
+    --radar-device "$RADAR_DEVICE"
   )
 
   if [ "$FAKE_PEOPLE" = 1 ]; then
@@ -282,6 +303,7 @@ start_remote_uploader() {
     printf '%s %s ' "--api-endpoint" "$(shell_quote "$api_endpoint")"
     printf '%s %s ' "--api-key" "$(shell_quote "$api_key")"
     printf '%s %s ' "--infractions-dir" "$(shell_quote "$REMOTE_INFRACTIONS_DIR")"
+    printf '%s %s ' "--radar-device" "$(shell_quote "$RADAR_DEVICE")"
     printf '%s %s ' "--serial-port" "$(shell_quote "$SERIAL_PORT")"
     printf '%s %s ' "--config-serial-port" "$(shell_quote "$CONFIG_SERIAL_PORT")"
     printf '%s %s' "--elf-path" "$(shell_quote "$REMOTE_RADAR_BINARY")"
@@ -304,6 +326,11 @@ while [ "$#" -gt 0 ]; do
     --remote-uploader)
       require_option_value "$1" "${2:-}"
       REMOTE_UPLOADER_HOST="$2"
+      shift
+      ;;
+    --radar-device)
+      require_option_value "$1" "${2:-}"
+      RADAR_DEVICE="$2"
       shift
       ;;
     -h | --help)
@@ -343,6 +370,8 @@ if [ "$START_WEB_ONLY" = 1 ]; then
 
   run_web_foreground
 fi
+
+validate_radar_device
 
 if [ "$LOCAL_WEB" = 1 ]; then
   API_ENDPOINT="$LOCAL_API_ENDPOINT"
