@@ -1,8 +1,6 @@
 {
   "assignee": "",
-  "blocked_by": [
-    "rc-edm.3"
-  ],
+  "blocked_by": [],
   "blocks": [
     "rc-edm.8"
   ],
@@ -15,5 +13,5 @@
   "status": "open",
   "title": "Add uploader radar device handshake",
   "type": "task",
-  "updated_at": "2026-06-28T08:53:51Z"
+  "updated_at": "2026-06-28T08:58:24Z"
 }
