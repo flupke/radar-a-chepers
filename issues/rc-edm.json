@@ -1,5 +1,5 @@
 {
-  "assignee": "",
+  "assignee": "Luper Rouch",
   "blocked_by": [],
   "blocks": [],
   "created": "2026-06-28T08:24:05Z",
@@ -7,8 +7,8 @@
   "id": "rc-edm",
   "labels": [],
   "priority": 2,
-  "status": "open",
+  "status": "in_progress",
   "title": "Support LD2451",
   "type": "epic",
-  "updated_at": "2026-06-28T08:27:45Z"
+  "updated_at": "2026-06-28T09:26:48Z"
 }
