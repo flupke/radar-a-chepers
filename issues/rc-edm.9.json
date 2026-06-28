@@ -13,7 +13,7 @@
   "parent": "rc-edm",
   "priority": 2,
   "status": "open",
-  "title": "Add device-specific admin configuration UI",
+  "title": "web: Add device-specific admin configuration UI",
   "type": "task",
-  "updated_at": "2026-06-28T09:15:27Z"
+  "updated_at": "2026-06-28T09:16:14Z"
 }
