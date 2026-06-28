@@ -27,14 +27,11 @@ use esp_hal::{
 use esp_println as _;
 use esp_wifi::ble::controller::BleConnector;
 use radar_a_chepers::{
-    command::{
-        CLOSE_COMMAND_MODE, FRAME_FOOTER, FRAME_HEADER, OPEN_COMMAND_MODE, RESPONSE_FRAME_HEADER,
-        SET_SINGLE_TARGET,
+    radar_module::{
+        RadarFrameState, RadarModule, RadarTarget, RadarTargetFrame, MAX_ACK_FRAME_HEADER_LENGTH,
+        MAX_TARGET_FRAME_HEADER_LENGTH,
     },
-    target::{
-        targets_list_header_position, Target, TargetsList, TARGETS_LIST_HEADER_LENGTH,
-        TARGETS_LIST_LENGTH,
-    },
+    rd03d::Rd03d,
 };
 use static_cell::StaticCell;
 
@@ -81,25 +78,8 @@ struct TriggerCheck {
     suspicious_speed: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RawFrameState {
-    Empty,
-    Targets,
-    SuspiciousSpeed,
-}
-
-impl RawFrameState {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Empty => "empty",
-            Self::Targets => "targets",
-            Self::SuspiciousSpeed => "suspicious-speed",
-        }
-    }
-}
-
 struct RawFrameDiagnostics {
-    last_state: Option<RawFrameState>,
+    last_state: Option<RadarFrameState>,
     saw_targets: bool,
 }
 
@@ -111,11 +91,11 @@ impl RawFrameDiagnostics {
         }
     }
 
-    fn observe(&mut self, targets: &TargetsList, frame: &[u8]) {
-        let state = raw_frame_state(targets);
+    fn observe<M: RadarModule>(&mut self, radar: &M, targets: &M::TargetFrame, frame: &[u8]) {
+        let state = radar.frame_diagnostic_state(targets);
         let should_log = self.should_log(state);
 
-        if state != RawFrameState::Empty {
+        if state != RadarFrameState::Empty {
             self.saw_targets = true;
         }
 
@@ -126,12 +106,12 @@ impl RawFrameDiagnostics {
         self.last_state = Some(state);
     }
 
-    fn should_log(&self, state: RawFrameState) -> bool {
+    fn should_log(&self, state: RadarFrameState) -> bool {
         if self.last_state.is_none() {
             return true;
         }
 
-        if state == RawFrameState::Empty && !self.saw_targets {
+        if state == RadarFrameState::Empty && !self.saw_targets {
             return false;
         }
 
@@ -146,30 +126,6 @@ const RADAR_INIT_RETRY_DELAY: embassy_time::Duration = embassy_time::Duration::f
 const RADAR_PASSIVE_PROBE_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(2);
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
-fn command_response_header_position(buffer: &[u8]) -> Option<(usize, usize)> {
-    let command_header = buffer
-        .windows(FRAME_HEADER.len())
-        .position(|window| window == FRAME_HEADER)
-        .map(|position| (position, FRAME_HEADER.len()));
-    let alternate_header = buffer
-        .windows(RESPONSE_FRAME_HEADER.len())
-        .position(|window| window == RESPONSE_FRAME_HEADER)
-        .map(|position| (position, RESPONSE_FRAME_HEADER.len()));
-
-    match (command_header, alternate_header) {
-        (Some(command_header), Some(alternate_header)) => {
-            Some(if command_header.0 <= alternate_header.0 {
-                command_header
-            } else {
-                alternate_header
-            })
-        }
-        (Some(command_header), None) => Some(command_header),
-        (None, Some(alternate_header)) => Some(alternate_header),
-        (None, None) => None,
-    }
-}
 
 async fn write(tx: &mut UartTx<'static, Async>, bytes: &[u8]) -> Result<(), ()> {
     defmt::info!("TX: {:#X}", bytes);
@@ -196,12 +152,16 @@ async fn flush_rx(rx: &mut UartRx<'static, Async>) {
     .ok();
 }
 
-async fn probe_radar_rx(rx: &mut UartRx<'static, Async>) -> bool {
+async fn probe_radar_rx<M: RadarModule>(radar: &M, rx: &mut UartRx<'static, Async>) -> bool {
     let mut chunk = [0u8; READ_BUF_SIZE];
     let mut byte_count = 0usize;
     let mut target_header_seen = false;
-    let mut previous = [0u8; TARGETS_LIST_HEADER_LENGTH - 1];
+    let mut previous = [0u8; MAX_TARGET_FRAME_HEADER_LENGTH - 1];
     let mut previous_len = 0usize;
+    let header_history_len = radar
+        .target_frame_header_length()
+        .saturating_sub(1)
+        .min(previous.len());
 
     let _ = embassy_time::with_timeout(RADAR_PASSIVE_PROBE_DURATION, async {
         loop {
@@ -214,14 +174,17 @@ async fn probe_radar_rx(rx: &mut UartRx<'static, Async>) -> bool {
                     defmt::info!("Passive radar RX: {:#X}", &chunk[..len]);
                     byte_count += len;
 
-                    let mut combined = [0u8; READ_BUF_SIZE + TARGETS_LIST_HEADER_LENGTH - 1];
+                    let mut combined = [0u8; READ_BUF_SIZE + MAX_TARGET_FRAME_HEADER_LENGTH - 1];
                     combined[..previous_len].copy_from_slice(&previous[..previous_len]);
                     combined[previous_len..previous_len + len].copy_from_slice(&chunk[..len]);
-                    if targets_list_header_position(&combined[..previous_len + len]).is_some() {
+                    if radar
+                        .target_frame_header_position(&combined[..previous_len + len])
+                        .is_some()
+                    {
                         target_header_seen = true;
                     }
 
-                    let keep = (previous_len + len).min(previous.len());
+                    let keep = (previous_len + len).min(header_history_len);
                     combined.copy_within(previous_len + len - keep..previous_len + len, 0);
                     previous[..keep].copy_from_slice(&combined[..keep]);
                     previous_len = keep;
@@ -251,10 +214,17 @@ async fn probe_radar_rx(rx: &mut UartRx<'static, Async>) -> bool {
     target_header_seen
 }
 
-async fn wait_for_ack(rx: &mut UartRx<'static, Async>) -> Result<(), ()> {
+async fn wait_for_ack<M: RadarModule>(
+    radar: &M,
+    rx: &mut UartRx<'static, Async>,
+) -> Result<(), ()> {
     let mut buffer = [0u8; STREAM_BUF_SIZE];
     let mut chunk = [0u8; READ_BUF_SIZE];
     let mut offset = 0;
+    let header_history_len = radar
+        .ack_frame_header_length()
+        .saturating_sub(1)
+        .min(MAX_ACK_FRAME_HEADER_LENGTH - 1);
     let result = embassy_time::with_timeout(embassy_time::Duration::from_secs(10), async {
         'wait: loop {
             match embedded_io_async::Read::read(rx, &mut chunk).await {
@@ -271,7 +241,7 @@ async fn wait_for_ack(rx: &mut UartRx<'static, Async>) -> Result<(), ()> {
                     defmt::info!("RX: {:#X}", &buffer[..offset]);
 
                     loop {
-                        let header_len = match command_response_header_position(&buffer[..offset]) {
+                        let header_len = match radar.ack_frame_header_position(&buffer[..offset]) {
                             Some(header_offset) if header_offset.0 > 0 => {
                                 buffer.copy_within(header_offset.0..offset, 0);
                                 offset -= header_offset.0;
@@ -279,7 +249,7 @@ async fn wait_for_ack(rx: &mut UartRx<'static, Async>) -> Result<(), ()> {
                             }
                             Some(header_offset) => header_offset.1,
                             None => {
-                                let keep = offset.min(RESPONSE_FRAME_HEADER.len() - 1);
+                                let keep = offset.min(header_history_len);
                                 buffer.copy_within(offset - keep..offset, 0);
                                 offset = keep;
                                 break;
@@ -293,7 +263,8 @@ async fn wait_for_ack(rx: &mut UartRx<'static, Async>) -> Result<(), ()> {
                         let data_len =
                             u16::from_le_bytes([buffer[header_len], buffer[header_len + 1]])
                                 as usize;
-                        let frame_len = header_len + 2 + data_len + FRAME_FOOTER.len();
+                        let footer = radar.ack_frame_footer();
+                        let frame_len = header_len + 2 + data_len + footer.len();
                         if frame_len > buffer.len() {
                             defmt::warn!("Invalid ACK length: {}", data_len);
                             buffer.copy_within(1..offset, 0);
@@ -303,7 +274,7 @@ async fn wait_for_ack(rx: &mut UartRx<'static, Async>) -> Result<(), ()> {
                         if offset < frame_len {
                             break;
                         }
-                        if buffer[frame_len - FRAME_FOOTER.len()..frame_len] == FRAME_FOOTER {
+                        if &buffer[frame_len - footer.len()..frame_len] == footer {
                             defmt::info!("ACK: {:#X}", &buffer[..frame_len]);
                             break 'wait;
                         }
@@ -331,25 +302,32 @@ async fn wait_for_ack(rx: &mut UartRx<'static, Async>) -> Result<(), ()> {
 }
 
 async fn send_command_and_wait_for_ack(
+    radar: &impl RadarModule,
     tx: &mut UartTx<'static, Async>,
     rx: &mut UartRx<'static, Async>,
     command: &[u8],
 ) -> Result<(), ()> {
     write(tx, command).await?;
-    wait_for_ack(rx).await
+    wait_for_ack(radar, rx).await
 }
 
-async fn configure_radar(tx: &mut UartTx<'static, Async>, rx: &mut UartRx<'static, Async>) {
+async fn configure_radar<M: RadarModule>(
+    radar: &M,
+    tx: &mut UartTx<'static, Async>,
+    rx: &mut UartRx<'static, Async>,
+) {
     let mut attempt = 1;
 
     loop {
         defmt::info!("Configuring radar module, attempt {}", attempt);
-        let target_stream_seen = probe_radar_rx(rx).await;
+        let target_stream_seen = probe_radar_rx(radar, rx).await;
 
         let result = async {
-            send_command_and_wait_for_ack(tx, rx, OPEN_COMMAND_MODE.get()).await?;
-            send_command_and_wait_for_ack(tx, rx, SET_SINGLE_TARGET.get()).await?;
-            send_command_and_wait_for_ack(tx, rx, CLOSE_COMMAND_MODE.get()).await?;
+            let mut command_index = 0;
+            while let Some(command) = radar.init_command(command_index) {
+                send_command_and_wait_for_ack(radar, tx, rx, command).await?;
+                command_index += 1;
+            }
             Ok(())
         }
         .await;
@@ -357,7 +335,7 @@ async fn configure_radar(tx: &mut UartTx<'static, Async>, rx: &mut UartRx<'stati
         match result {
             Ok(()) => {
                 flush_rx(rx).await;
-                defmt::info!("Entered single target mode");
+                defmt::info!("{}", radar.configured_message());
                 return;
             }
             Err(()) => {
@@ -513,6 +491,7 @@ async fn reader(
     mut trigger: Output<'static>,
     trigger_config: &'static SharedTriggerConfig,
 ) {
+    let radar = Rd03d;
     let mut rbuf = [0u8; STREAM_BUF_SIZE];
     let mut chunk = [0u8; READ_BUF_SIZE];
     let mut offset = 0;
@@ -544,43 +523,52 @@ async fn reader(
                     defmt::debug!("RX: {:#X}", &rbuf[..offset]);
 
                     loop {
-                        match targets_list_header_position(&rbuf[..offset]) {
+                        match radar.target_frame_header_position(&rbuf[..offset]) {
                             Some(header_offset) if header_offset > 0 => {
                                 rbuf.copy_within(header_offset..offset, 0);
                                 offset -= header_offset;
                             }
                             Some(_) => {}
                             None => {
-                                let keep = offset.min(TARGETS_LIST_HEADER_LENGTH - 1);
+                                let keep = offset
+                                    .min(radar.target_frame_header_length().saturating_sub(1));
                                 rbuf.copy_within(offset - keep..offset, 0);
                                 offset = keep;
                                 break;
                             }
                         }
 
-                        if offset < TARGETS_LIST_LENGTH {
+                        if offset < radar.target_frame_length() {
                             break;
                         }
 
-                        match TargetsList::try_from(&rbuf[..TARGETS_LIST_LENGTH]) {
+                        let frame_length = radar.target_frame_length();
+                        match radar.parse_target_frame(&rbuf[..frame_length]) {
                             Ok(targets) => {
-                                raw_frame_diagnostics
-                                    .observe(&targets, &rbuf[..TARGETS_LIST_LENGTH]);
+                                raw_frame_diagnostics.observe(
+                                    &radar,
+                                    &targets,
+                                    &rbuf[..frame_length],
+                                );
                                 defmt::debug!("Targets: {:#?}", targets);
                                 for target in targets.targets().iter().flatten() {
-                                    let speed = target.speed.saturating_neg();
+                                    let speed = target.raw_speed_cm_s();
                                     defmt::info!(
                                         "{}{}{} {} {}",
                                         EVENTS_PREFIX,
                                         TARGET_PREFIX,
                                         speed,
-                                        target.x,
-                                        target.y
+                                        target.x_mm(),
+                                        target.y_mm()
                                     );
 
-                                    let check =
-                                        trigger_check(target, trigger_config, last_trigger_at)
-                                            .await;
+                                    let check = trigger_check(
+                                        &radar,
+                                        target,
+                                        trigger_config,
+                                        last_trigger_at,
+                                    )
+                                    .await;
                                     if should_log_capture_check(
                                         check.decision,
                                         last_check_decision,
@@ -601,8 +589,8 @@ async fn reader(
                                             EVENTS_PREFIX,
                                             TRIGGER_PREFIX,
                                             speed,
-                                            target.x,
-                                            target.y
+                                            target.x_mm(),
+                                            target.y_mm()
                                         );
                                         pulse_trigger(&mut trigger).await;
                                     }
@@ -611,8 +599,8 @@ async fn reader(
                             Err(err) => defmt::error!("Error parsing targets: {:?}", err),
                         }
 
-                        rbuf.copy_within(TARGETS_LIST_LENGTH..offset, 0);
-                        offset -= TARGETS_LIST_LENGTH;
+                        rbuf.copy_within(frame_length..offset, 0);
+                        offset -= frame_length;
                     }
                 }
                 Err(err) => defmt::error!("RX Error: {:?}", err),
@@ -621,21 +609,19 @@ async fn reader(
     }
 }
 
-async fn trigger_check(
-    target: &Target,
+async fn trigger_check<M: RadarModule, T: RadarTarget>(
+    radar: &M,
+    target: &T,
     trigger_config: &'static SharedTriggerConfig,
     last_trigger_at: Option<Instant>,
 ) -> TriggerCheck {
     let config = *trigger_config.lock().await;
-    let raw_speed_kmh = raw_speed_cm_s_to_abs_kmh(target.speed);
-    let suspicious_speed = is_suspicious_rd03d_speed(target.speed);
-    let speed_kmh =
-        effective_speed_kmh(raw_speed_kmh, config.authorized_speed_kmh, suspicious_speed);
+    let speed = radar.interpret_speed(target.raw_speed_cm_s(), config.authorized_speed_kmh);
     let mut check = TriggerCheck {
         decision: TriggerDecision::Trigger,
-        speed_kmh,
+        speed_kmh: speed.effective_kmh,
         authorized_speed_kmh: config.authorized_speed_kmh,
-        suspicious_speed,
+        suspicious_speed: speed.suspicious,
     };
 
     if config.capture_paused {
@@ -643,13 +629,13 @@ async fn trigger_check(
         return check;
     }
 
-    if speed_kmh <= config.authorized_speed_kmh {
+    if speed.effective_kmh <= config.authorized_speed_kmh {
         check.decision = TriggerDecision::TooSlow;
         return check;
     }
 
-    let distance_squared =
-        i64::from(target.x) * i64::from(target.x) + i64::from(target.y) * i64::from(target.y);
+    let distance_squared = i64::from(target.x_mm()) * i64::from(target.x_mm())
+        + i64::from(target.y_mm()) * i64::from(target.y_mm());
     let min_squared = i64::from(config.min_dist_mm) * i64::from(config.min_dist_mm);
     let max_squared = i64::from(config.max_dist_mm) * i64::from(config.max_dist_mm);
     if distance_squared < min_squared || distance_squared > max_squared {
@@ -657,8 +643,8 @@ async fn trigger_check(
         return check;
     }
 
-    let angle =
-        libm::atan2f(target.x as f32, target.y as f32).abs() * 180.0 / core::f32::consts::PI;
+    let angle = libm::atan2f(target.x_mm() as f32, target.y_mm() as f32).abs() * 180.0
+        / core::f32::consts::PI;
     if angle > config.aperture_angle_degrees as f32 / 2.0 {
         check.decision = TriggerDecision::OutOfAperture;
         return check;
@@ -688,15 +674,15 @@ fn should_log_capture_check(
     }
 }
 
-fn log_capture_check(check: &TriggerCheck, target: &Target) {
+fn log_capture_check<T: RadarTarget>(check: &TriggerCheck, target: &T) {
     match check.decision {
         TriggerDecision::Trigger => {
             defmt::info!(
                 "Capture check passed: speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
                 check.suspicious_speed,
-                target.x,
-                target.y
+                target.x_mm(),
+                target.y_mm()
             );
         }
         TriggerDecision::Paused => {
@@ -704,8 +690,8 @@ fn log_capture_check(check: &TriggerCheck, target: &Target) {
                 "Capture check blocked: paused speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
                 check.suspicious_speed,
-                target.x,
-                target.y
+                target.x_mm(),
+                target.y_mm()
             );
         }
         TriggerDecision::TooSlow => {
@@ -714,8 +700,8 @@ fn log_capture_check(check: &TriggerCheck, target: &Target) {
                 check.speed_kmh,
                 check.authorized_speed_kmh,
                 check.suspicious_speed,
-                target.x,
-                target.y
+                target.x_mm(),
+                target.y_mm()
             );
         }
         TriggerDecision::OutOfRange => {
@@ -723,8 +709,8 @@ fn log_capture_check(check: &TriggerCheck, target: &Target) {
                 "Capture check blocked: out of range speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
                 check.suspicious_speed,
-                target.x,
-                target.y
+                target.x_mm(),
+                target.y_mm()
             );
         }
         TriggerDecision::OutOfAperture => {
@@ -732,8 +718,8 @@ fn log_capture_check(check: &TriggerCheck, target: &Target) {
                 "Capture check blocked: outside aperture speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
                 check.suspicious_speed,
-                target.x,
-                target.y
+                target.x_mm(),
+                target.y_mm()
             );
         }
         TriggerDecision::Cooldown => {
@@ -741,75 +727,34 @@ fn log_capture_check(check: &TriggerCheck, target: &Target) {
                 "Capture check blocked: cooldown speed={}km/h sentinel={} x={} y={}",
                 check.speed_kmh,
                 check.suspicious_speed,
-                target.x,
-                target.y
+                target.x_mm(),
+                target.y_mm()
             );
         }
     }
 }
 
-fn raw_speed_cm_s_to_abs_kmh(raw_speed_cm_s: i16) -> i16 {
-    ((i32::from(raw_speed_cm_s).abs() * 36 + 500) / 1000) as i16
-}
-
-fn effective_speed_kmh(
-    raw_speed_kmh: i16,
-    authorized_speed_kmh: i16,
-    suspicious_speed: bool,
-) -> i16 {
-    if suspicious_speed {
-        raw_speed_kmh.max(authorized_speed_kmh.saturating_add(1))
-    } else {
-        raw_speed_kmh
-    }
-}
-
-fn raw_frame_state(targets: &TargetsList) -> RawFrameState {
-    let mut has_targets = false;
-
-    for target in targets.targets().iter().flatten() {
-        has_targets = true;
-        if is_suspicious_rd03d_speed(target.speed) {
-            return RawFrameState::SuspiciousSpeed;
-        }
-    }
-
-    if has_targets {
-        RawFrameState::Targets
-    } else {
-        RawFrameState::Empty
-    }
-}
-
-fn is_suspicious_rd03d_speed(raw_speed_cm_s: i16) -> bool {
-    matches!(i32::from(raw_speed_cm_s).abs(), 248 | 256)
-}
-
-fn log_raw_frame_diagnostic(state: RawFrameState, targets: &TargetsList, frame: &[u8]) {
+fn log_raw_frame_diagnostic<F: RadarTargetFrame>(
+    state: RadarFrameState,
+    targets: &F,
+    frame: &[u8],
+) {
     defmt::info!(
         "Radar raw frame diagnostic: state={} targets={} bytes={:#X}",
         state.label(),
-        target_count(targets),
+        targets.target_count(),
         frame
     );
 
     for target in targets.targets().iter().flatten() {
         defmt::info!(
             "Radar raw target: speed={}cm/s x={} y={} res={}",
-            target.speed.saturating_neg(),
-            target.x,
-            target.y,
-            target.distance_resolution
+            target.raw_speed_cm_s(),
+            target.x_mm(),
+            target.y_mm(),
+            target.distance_resolution_mm()
         );
     }
-}
-
-fn target_count(targets: &TargetsList) -> usize {
-    targets
-        .targets()
-        .iter()
-        .filter(|target| target.is_some())
-        .count()
 }
 
 async fn pulse_trigger(trigger: &mut Output<'static>) {
@@ -873,7 +818,8 @@ async fn main(spawner: Spawner) {
         .into_async();
     let (config_rx, config_tx) = config_uart.split();
 
-    configure_radar(&mut tx, &mut rx).await;
+    let radar = Rd03d;
+    configure_radar(&radar, &mut tx, &mut rx).await;
 
     spawner
         .spawn(config_reader(config_rx, config_tx, trigger_config))
