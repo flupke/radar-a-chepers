@@ -5,7 +5,7 @@
   ],
   "blocks": [],
   "created": "2026-06-28T08:53:42Z",
-  "description": "Update the admin radar configuration screen to show the single active connected device and test_mode state, while allowing editing stored configs for supported real device types rd03d and ld2451. The selected config form must load/save by device_type, highlight the active device when connected, and show No device connected when no registered uploader is active.",
+  "description": "Web track. Update the admin radar configuration screen to show the single active connected device and test_mode state, while allowing editing stored configs for supported real device types rd03d and ld2451. The selected config form must load/save by device_type, highlight the active device when connected, and show No device connected when no registered uploader is active.",
   "id": "rc-edm.9",
   "labels": [],
   "parent": "rc-edm",
@@ -13,5 +13,5 @@
   "status": "open",
   "title": "Add device-specific admin configuration UI",
   "type": "task",
-  "updated_at": "2026-06-28T08:53:51Z"
+  "updated_at": "2026-06-28T08:58:50Z"
 }
