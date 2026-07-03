@@ -31,7 +31,7 @@ use radar_a_chepers::{
         RadarFrameState, RadarModule, RadarTarget, RadarTargetFrame, MAX_ACK_FRAME_HEADER_LENGTH,
         MAX_TARGET_FRAME_HEADER_LENGTH,
     },
-    rd03d::Rd03d,
+    selected_radar::selected_radar_module,
 };
 use static_cell::StaticCell;
 
@@ -491,7 +491,7 @@ async fn reader(
     mut trigger: Output<'static>,
     trigger_config: &'static SharedTriggerConfig,
 ) {
-    let radar = Rd03d;
+    let radar = selected_radar_module();
     let mut rbuf = [0u8; STREAM_BUF_SIZE];
     let mut chunk = [0u8; READ_BUF_SIZE];
     let mut offset = 0;
@@ -818,7 +818,7 @@ async fn main(spawner: Spawner) {
         .into_async();
     let (config_rx, config_tx) = config_uart.split();
 
-    let radar = Rd03d;
+    let radar = selected_radar_module();
     configure_radar(&radar, &mut tx, &mut rx).await;
 
     spawner
