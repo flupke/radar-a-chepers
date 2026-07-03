@@ -88,8 +88,13 @@ defmodule RadarWeb.RadarConfigChannel do
   def handle_in(
         "target_data",
         payload,
-        %{assigns: %{registered_device_type: _device_type}} = socket
+        %{assigns: %{registered_device_type: device_type, test_mode: test_mode}} = socket
       ) do
+    payload =
+      payload
+      |> Map.put("device_type", device_type)
+      |> Map.put("test_mode", test_mode)
+
     RadarData.update_target(payload)
     {:noreply, socket}
   end
