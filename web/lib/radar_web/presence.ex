@@ -11,10 +11,13 @@ defmodule RadarWeb.Presence do
   def uploader_topic, do: @uploader_topic
   def uploader_key, do: @uploader_key
 
-  def track_uploader(pid \\ self()) do
-    track(pid, @uploader_topic, @uploader_key, %{
-      online_at: DateTime.utc_now() |> DateTime.to_iso8601()
-    })
+  def track_uploader(pid \\ self(), meta \\ %{}) do
+    meta =
+      meta
+      |> Map.new()
+      |> Map.put(:online_at, DateTime.utc_now() |> DateTime.to_iso8601())
+
+    track(pid, @uploader_topic, @uploader_key, meta)
   end
 
   def untrack_uploader(pid \\ self()) do
