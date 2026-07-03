@@ -16,6 +16,7 @@ ESPFLASH_BINARY="${ROOT_DIR}/.nix/espflash/${UPLOADER_TARGET}/bin/espflash"
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
 CONFIG_SERIAL_PORT="${CONFIG_SERIAL_PORT:-/dev/serial0}"
 RADAR_BINARY="${RADAR_BINARY:-${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers}"
+RADAR_DEVICE="${RADAR_DEVICE:-}"
 
 REMOTE="${REMOTE:-rshep.local}"
 REMOTE_FROM_CLI=0
@@ -55,6 +56,8 @@ Options:
   --serial-port PATH          ESP USB serial device for flashing/logs. Default: ${SERIAL_PORT}
   --config-serial-port PATH   Pi UART device used to send config to ESP.
                               Default: ${CONFIG_SERIAL_PORT}
+  --radar-device DEVICE       Active radar device for this uploader connection: rd03d or ld2451.
+                              RADAR_DEVICE can also provide this value.
   --radar-binary PATH         Local radar firmware ELF to copy.
                               Default: ${RADAR_BINARY}
   --remote-app-dir PATH       Remote install directory. Default: ${REMOTE_APP_DIR}
@@ -109,6 +112,23 @@ target_env_name() {
   local target="$1"
   target="${target//-/_}"
   printf '%s\n' "${target^^}"
+}
+
+validate_radar_device() {
+  if [ -z "$RADAR_DEVICE" ]; then
+    echo "error: --radar-device is required (rd03d or ld2451)" >&2
+    exit 1
+  fi
+
+  case "$RADAR_DEVICE" in
+    rd03d | ld2451)
+      ;;
+    *)
+      echo "error: unsupported radar device: ${RADAR_DEVICE}" >&2
+      echo "       expected one of: rd03d, ld2451" >&2
+      exit 1
+      ;;
+  esac
 }
 
 run_cargo() {
@@ -230,6 +250,7 @@ write_env_file() {
     printf 'INFRACTIONS_DIR=%s\n' "$REMOTE_INFRACTIONS_DIR"
     printf 'SERIAL_PORT=%s\n' "$SERIAL_PORT"
     printf 'CONFIG_SERIAL_PORT=%s\n' "$CONFIG_SERIAL_PORT"
+    printf 'RADAR_DEVICE=%s\n' "$RADAR_DEVICE"
     printf 'ELF_PATH=%s\n' "$REMOTE_RADAR_BINARY"
     printf 'RUST_LOG=%s\n' "$RUST_LOG"
   } >"$env_file"
@@ -247,7 +268,7 @@ After=network-online.target
 [Service]
 Environment=RUST_LOG=${RUST_LOG}
 WorkingDirectory=${REMOTE_APP_DIR}
-ExecStart=${REMOTE_APP_DIR}/uploader --api-endpoint ${API_ENDPOINT} --api-key ${API_KEY} --infractions-dir ${REMOTE_INFRACTIONS_DIR} --serial-port ${SERIAL_PORT} --config-serial-port ${CONFIG_SERIAL_PORT} --elf-path ${REMOTE_RADAR_BINARY}
+ExecStart=${REMOTE_APP_DIR}/uploader --api-endpoint ${API_ENDPOINT} --api-key ${API_KEY} --infractions-dir ${REMOTE_INFRACTIONS_DIR} --radar-device ${RADAR_DEVICE} --serial-port ${SERIAL_PORT} --config-serial-port ${CONFIG_SERIAL_PORT} --elf-path ${REMOTE_RADAR_BINARY}
 Restart=always
 RestartSec=5
 
@@ -329,6 +350,11 @@ while [ "$#" -gt 0 ]; do
       CONFIG_SERIAL_PORT="$2"
       shift
       ;;
+    --radar-device)
+      require_option_value "$1" "${2:-}"
+      RADAR_DEVICE="$2"
+      shift
+      ;;
     --radar-binary)
       require_option_value "$1" "${2:-}"
       RADAR_BINARY="$2"
@@ -389,6 +415,8 @@ while [ "$#" -gt 0 ]; do
 
   shift
 done
+
+validate_radar_device
 
 LOCAL_TMP_DIR="$(mktemp -d)"
 

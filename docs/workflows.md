@@ -11,7 +11,7 @@ This project has three runtime pieces:
 Deploy the uploader and ESP firmware to the Pi:
 
 ```sh
-./install.sh
+./install.sh --radar-device rd03d
 ```
 
 Defaults:
@@ -19,6 +19,7 @@ Defaults:
 - SSH host: `rshep.local`
 - ESP USB serial for flashing and firmware logs: `/dev/ttyACM0`
 - Pi-to-ESP config UART: `/dev/serial0`
+- Radar device: explicit `rd03d` or `ld2451` via `--radar-device`
 
 The install script always rebuilds the ESP firmware, flashes it before updating the uploader service, and restarts `radar-uploader.service`.
 
@@ -39,7 +40,7 @@ make deploy-all
 Use this when working on the admin UI without hardware:
 
 ```sh
-./start.sh --fake-people --local-web
+./start.sh --radar-device rd03d --fake-people --local-web
 ```
 
 This starts Phoenix locally and runs the uploader in `--test-mode` against `http://localhost:4000`.
@@ -49,7 +50,7 @@ This starts Phoenix locally and runs the uploader in `--test-mode` against `http
 Use this when debugging the real radar through the local admin page:
 
 ```sh
-./start.sh --local-web --remote-uploader rshep.local
+./start.sh --radar-device rd03d --local-web --remote-uploader rshep.local
 ```
 
 This starts Phoenix locally, detects this machine's LAN IPv4 address, stops the Pi's normal `radar-uploader.service`, and runs the installed Pi uploader over SSH against the local web server.
@@ -57,7 +58,7 @@ This starts Phoenix locally, detects this machine's LAN IPv4 address, stops the 
 If LAN IP detection is wrong, override it:
 
 ```sh
-LOCAL_API_ENDPOINT_LAN=http://192.168.1.65:4000 ./start.sh --local-web --remote-uploader rshep.local
+LOCAL_API_ENDPOINT_LAN=http://192.168.1.65:4000 ./start.sh --radar-device rd03d --local-web --remote-uploader rshep.local
 ```
 
 When the local `start.sh` process exits, it should restart the normal Pi service. If cleanup is interrupted, restore it manually:

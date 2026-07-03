@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use clap::ValueEnum;
 use phoenix_channels_client::{Client, Config, Payload};
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -11,9 +12,28 @@ use crate::{
     uploader_logger::UploaderLog,
 };
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum RadarDeviceType {
+    #[value(name = "rd03d")]
+    Rd03d,
+    #[value(name = "ld2451")]
+    Ld2451,
+}
+
+impl RadarDeviceType {
+    fn as_wire_value(self) -> &'static str {
+        match self {
+            Self::Rd03d => "rd03d",
+            Self::Ld2451 => "ld2451",
+        }
+    }
+}
+
 pub async fn run(
     api_endpoint: String,
     api_key: String,
+    radar_device: RadarDeviceType,
+    test_mode: bool,
     config_tx: tokio::sync::mpsc::UnboundedSender<RadarConfig>,
     mut target_data_rx: broadcast::Receiver<TargetData>,
     mut uploader_log_rx: broadcast::Receiver<UploaderLog>,
@@ -22,6 +42,8 @@ pub async fn run(
         match connect_and_run(
             &api_endpoint,
             &api_key,
+            radar_device,
+            test_mode,
             &config_tx,
             &mut target_data_rx,
             &mut uploader_log_rx,
@@ -38,6 +60,8 @@ pub async fn run(
 async fn connect_and_run(
     api_endpoint: &str,
     api_key: &str,
+    radar_device: RadarDeviceType,
+    test_mode: bool,
     config_tx: &tokio::sync::mpsc::UnboundedSender<RadarConfig>,
     target_data_rx: &mut broadcast::Receiver<TargetData>,
     uploader_log_rx: &mut broadcast::Receiver<UploaderLog>,
@@ -63,11 +87,23 @@ async fn connect_and_run(
         .map_err(|e| eyre::eyre!("join error: {e}"))?;
     log::info!("Joined radar:config channel");
 
+    let register_reply = channel
+        .send("register_device", register_device_payload(radar_device, test_mode))
+        .await
+        .map_err(|e| channel_send_error("register_device", e))?;
+    ensure_no_device_registration_error("register_device", &register_reply)?;
+    log::info!(
+        "Registered {:?} radar device with config channel (test_mode={})",
+        radar_device,
+        test_mode
+    );
+
     // Request initial config
     let reply = channel
         .send("get_config", serde_json::json!({}))
         .await
-        .map_err(|e| eyre::eyre!("get_config error: {e}"))?;
+        .map_err(|e| channel_send_error("get_config", e))?;
+    ensure_no_device_registration_error("get_config", &reply)?;
     if let Some(config) = parse_config_payload(&reply) {
         let _ = config_tx.send(config);
         log::info!("Received initial config");
@@ -163,6 +199,53 @@ async fn connect_and_run(
     Ok(())
 }
 
+fn register_device_payload(radar_device: RadarDeviceType, test_mode: bool) -> Value {
+    serde_json::json!({
+        "device_type": radar_device.as_wire_value(),
+        "test_mode": test_mode,
+    })
+}
+
+fn channel_send_error(
+    event: &'static str,
+    error: impl std::fmt::Display,
+) -> eyre::Report {
+    let error = error.to_string();
+    if let Some(reason) = known_device_registration_error(&error) {
+        eyre::eyre!("{event} rejected by config channel: {reason}; reconnecting to register device")
+    } else {
+        eyre::eyre!("{event} error: {error}")
+    }
+}
+
+fn ensure_no_device_registration_error(event: &'static str, payload: &Payload) -> eyre::Result<()> {
+    if let Some(reason) = known_device_registration_payload_error(payload) {
+        return Err(eyre::eyre!(
+            "{event} rejected by config channel: {reason}; reconnecting to register device"
+        ));
+    }
+    Ok(())
+}
+
+fn known_device_registration_payload_error(payload: &Payload) -> Option<&'static str> {
+    match payload {
+        Payload::Value(value) => known_device_registration_error(&value.to_string()),
+        Payload::Binary(bytes) => {
+            known_device_registration_error(&String::from_utf8_lossy(bytes))
+        }
+    }
+}
+
+fn known_device_registration_error(text: &str) -> Option<&'static str> {
+    if text.contains("device_not_registered") {
+        Some("device_not_registered")
+    } else if text.contains("device_already_connected") {
+        Some("device_already_connected")
+    } else {
+        None
+    }
+}
+
 fn target_data_payload(data: &TargetData) -> Value {
     serde_json::json!({
         "raw_speed_cm_s": data.raw_speed_cm_s,
@@ -228,6 +311,40 @@ mod tests {
         }
 
         Payload::Value(value)
+    }
+
+    #[test]
+    fn builds_rd03d_real_registration_payload() {
+        assert_eq!(
+            register_device_payload(RadarDeviceType::Rd03d, false),
+            serde_json::json!({
+                "device_type": "rd03d",
+                "test_mode": false,
+            })
+        );
+    }
+
+    #[test]
+    fn builds_ld2451_fake_registration_payload() {
+        assert_eq!(
+            register_device_payload(RadarDeviceType::Ld2451, true),
+            serde_json::json!({
+                "device_type": "ld2451",
+                "test_mode": true,
+            })
+        );
+    }
+
+    #[test]
+    fn recognizes_device_registration_reply_errors() {
+        let payload = Payload::Value(serde_json::json!({
+            "reason": "device_already_connected"
+        }));
+
+        assert_eq!(
+            known_device_registration_payload_error(&payload),
+            Some("device_already_connected")
+        );
     }
 
     #[test]
