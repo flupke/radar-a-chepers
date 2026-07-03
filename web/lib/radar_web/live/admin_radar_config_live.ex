@@ -5,11 +5,12 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   alias Radar.{Infractions, RadarConfigs, RadarData}
   alias Phoenix.LiveView.ColocatedHook
+  alias RadarWeb.ActiveRadar
   alias RadarWeb.Presence
 
   @max_uploader_logs 100
   @uploader_debug_topic "uploader_debug"
-  @device_type "rd03d"
+  @default_device_type "rd03d"
 
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -20,12 +21,16 @@ defmodule RadarWeb.AdminRadarConfigLive do
       Phoenix.PubSub.subscribe(Radar.PubSub, Presence.uploader_topic())
     end
 
-    config = RadarConfigs.get_config!(@device_type)
+    active_radar = ActiveRadar.current()
+    selected_device_type = selected_device_type(active_radar)
+    config = RadarConfigs.get_config!(selected_device_type)
     last_target = last_known_target()
 
     socket =
       socket
-      |> assign(:device_type, @device_type)
+      |> assign(:supported_device_types, RadarConfigs.supported_device_types())
+      |> assign(:selected_device_type, selected_device_type)
+      |> assign(:active_radar, active_radar)
       |> assign(:config, config)
       |> assign(:form, config_to_form(config))
       |> assign(:infraction_count, Infractions.count_infractions())
@@ -70,6 +75,36 @@ defmodule RadarWeb.AdminRadarConfigLive do
                 <.icon name={capture_button_icon(@config)} class="size-4" />
                 {capture_button_label(@config)}
               </button>
+            </div>
+
+            <div class="grid gap-3 rounded-lg bg-base-300 p-3 text-sm sm:grid-cols-[1fr_auto] sm:items-center">
+              <div id="active-device-status">
+                <span class="opacity-70">Active device</span>
+                <div :if={@active_radar} class="mt-1 flex flex-wrap items-center gap-2">
+                  <span class="font-mono">{device_label(@active_radar.device_type)}</span>
+                  <span class={test_mode_badge_class(@active_radar.test_mode)}>
+                    {test_mode_label(@active_radar.test_mode)}
+                  </span>
+                </div>
+                <div :if={!@active_radar} class="mt-1 font-mono">No device connected</div>
+              </div>
+              <div id="device-config-selector" class="flex flex-wrap gap-2">
+                <button
+                  :for={device_type <- @supported_device_types}
+                  type="button"
+                  phx-click="select_device"
+                  phx-value-device={device_type}
+                  class={device_button_class(device_type, @selected_device_type, @active_radar)}
+                >
+                  {device_label(device_type)}
+                  <span
+                    :if={active_device?(device_type, @active_radar)}
+                    class="badge badge-success badge-sm"
+                  >
+                    active
+                  </span>
+                </button>
+              </div>
             </div>
 
             <.form for={@form} phx-change="update_config" class="space-y-5">
@@ -124,7 +159,9 @@ defmodule RadarWeb.AdminRadarConfigLive do
               id="radar-canvas"
               phx-hook=".RadarCanvas"
               phx-update="ignore"
-              data-radar-config={Jason.encode!(RadarConfigs.config_payload(@device_type, @config))}
+              data-radar-config={
+                Jason.encode!(RadarConfigs.config_payload(@selected_device_type, @config))
+              }
               width="600"
               height="400"
               class="w-full rounded-lg"
@@ -352,10 +389,26 @@ defmodule RadarWeb.AdminRadarConfigLive do
     """
   end
 
+  def handle_event("select_device", %{"device" => device_type}, socket) do
+    if device_type in socket.assigns.supported_device_types do
+      config = RadarConfigs.get_config!(device_type)
+
+      {:noreply,
+       socket
+       |> assign(:selected_device_type, device_type)
+       |> assign(:config, config)
+       |> assign(:form, config_to_form(config))
+       |> push_config_event(config)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("update_config", %{"config" => params}, socket) do
     db_params = form_params_to_db(params)
+    device_type = socket.assigns.selected_device_type
 
-    case RadarConfigs.update_config(@device_type, db_params) do
+    case RadarConfigs.update_config(device_type, db_params) do
       {:ok, config} ->
         {:noreply,
          socket
@@ -369,7 +422,9 @@ defmodule RadarWeb.AdminRadarConfigLive do
   end
 
   def handle_event("toggle_capture", _params, socket) do
-    case RadarConfigs.update_config(@device_type, %{
+    device_type = socket.assigns.selected_device_type
+
+    case RadarConfigs.update_config(device_type, %{
            capture_paused: !socket.assigns.config.capture_paused
          }) do
       {:ok, config} ->
@@ -384,15 +439,17 @@ defmodule RadarWeb.AdminRadarConfigLive do
     end
   end
 
-  def handle_info({:config_updated, %{device_type: @device_type} = config}, socket) do
-    {:noreply,
-     socket
-     |> assign(:config, config)
-     |> assign(:form, config_to_form(config))
-     |> push_config_event(config)}
+  def handle_info({:config_updated, %{device_type: device_type} = config}, socket) do
+    if device_type == socket.assigns.selected_device_type do
+      {:noreply,
+       socket
+       |> assign(:config, config)
+       |> assign(:form, config_to_form(config))
+       |> push_config_event(config)}
+    else
+      {:noreply, socket}
+    end
   end
-
-  def handle_info({:config_updated, _config}, socket), do: {:noreply, socket}
 
   def handle_info({:new_infraction, _infraction}, socket) do
     {:noreply, assign(socket, :infraction_count, Infractions.count_infractions())}
@@ -419,7 +476,10 @@ defmodule RadarWeb.AdminRadarConfigLive do
             socket.assigns.uploader_debug.connected
         end
 
-      {:noreply, update(socket, :uploader_debug, &%{&1 | connected: connected})}
+      {:noreply,
+       socket
+       |> update(:uploader_debug, &%{&1 | connected: connected})
+       |> refresh_active_radar()}
     else
       {:noreply, socket}
     end
@@ -464,6 +524,9 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   defp parse_page(_page), do: 1
 
+  defp selected_device_type(%{device_type: device_type}), do: device_type
+  defp selected_device_type(_active_radar), do: @default_device_type
+
   defp config_to_form(config) do
     to_form(
       %{
@@ -490,6 +553,33 @@ defmodule RadarWeb.AdminRadarConfigLive do
       "aperture_angle" => params["aperture_angle"]
     }
   end
+
+  defp active_device?(device_type, %{device_type: device_type}), do: true
+  defp active_device?(_device_type, _active_radar), do: false
+
+  defp device_label("rd03d"), do: "RD03-D"
+  defp device_label("ld2451"), do: "LD2451"
+  defp device_label(device_type), do: String.upcase(device_type)
+
+  defp device_button_class(device_type, selected_device_type, active_radar) do
+    selected? = device_type == selected_device_type
+    active? = active_device?(device_type, active_radar)
+
+    [
+      "btn btn-sm",
+      selected? && "btn-primary",
+      !selected? && active? && "btn-success btn-outline",
+      !selected? && !active? && "btn-ghost"
+    ]
+    |> Enum.filter(& &1)
+    |> Enum.join(" ")
+  end
+
+  defp test_mode_label(true), do: "Test mode"
+  defp test_mode_label(false), do: "Live hardware"
+
+  defp test_mode_badge_class(true), do: "badge badge-warning"
+  defp test_mode_badge_class(false), do: "badge badge-info"
 
   defp capture_status(%{capture_paused: true}), do: "paused"
   defp capture_status(_config), do: "active"
@@ -610,6 +700,10 @@ defmodule RadarWeb.AdminRadarConfigLive do
     }
   end
 
+  defp refresh_active_radar(socket) do
+    assign(socket, :active_radar, ActiveRadar.current())
+  end
+
   attr :field, Phoenix.HTML.FormField, required: true
   attr :label, :string, required: true
   attr :unit, :string, required: true
@@ -641,7 +735,11 @@ defmodule RadarWeb.AdminRadarConfigLive do
   end
 
   defp push_config_event(socket, config) do
-    push_event(socket, "radar_config", RadarConfigs.config_payload(@device_type, config))
+    push_event(
+      socket,
+      "radar_config",
+      RadarConfigs.config_payload(socket.assigns.selected_device_type, config)
+    )
   end
 
   defp parse_float(val) when is_binary(val) do
