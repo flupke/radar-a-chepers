@@ -5,10 +5,12 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   alias Radar.{Infractions, RadarConfigs, RadarData}
   alias Phoenix.LiveView.ColocatedHook
+  alias RadarWeb.ActiveRadar
   alias RadarWeb.Presence
 
   @max_uploader_logs 100
   @uploader_debug_topic "uploader_debug"
+  @default_device_type "rd03d"
 
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -19,17 +21,26 @@ defmodule RadarWeb.AdminRadarConfigLive do
       Phoenix.PubSub.subscribe(Radar.PubSub, Presence.uploader_topic())
     end
 
-    config = RadarConfigs.get_config!()
-    last_target = last_known_target()
+    active_radar = ActiveRadar.current()
+    selected_device_type = selected_device_type(active_radar)
+    config = RadarConfigs.get_config!(selected_device_type)
+    debug_device_type = debug_device_type(active_radar, selected_device_type)
+    debug_config = RadarConfigs.get_config!(debug_device_type)
+    last_target = last_known_target(active_radar)
 
     socket =
       socket
+      |> assign(:supported_device_types, RadarConfigs.supported_device_types())
+      |> assign(:selected_device_type, selected_device_type)
+      |> assign(:active_radar, active_radar)
       |> assign(:config, config)
+      |> assign(:debug_device_type, debug_device_type)
+      |> assign(:debug_config, debug_config)
       |> assign(:form, config_to_form(config))
       |> assign(:infraction_count, Infractions.count_infractions())
       |> assign(:uploader_debug, %{connected: Presence.uploader_connected?(), logs: []})
       |> assign(:last_target, last_target)
-      |> push_config_event(config)
+      |> push_debug_config_event()
 
     {:ok, socket}
   end
@@ -70,6 +81,36 @@ defmodule RadarWeb.AdminRadarConfigLive do
               </button>
             </div>
 
+            <div class="grid gap-3 rounded-lg bg-base-300 p-3 text-sm sm:grid-cols-[1fr_auto] sm:items-center">
+              <div id="active-device-status">
+                <span class="opacity-70">Active device</span>
+                <div :if={@active_radar} class="mt-1 flex flex-wrap items-center gap-2">
+                  <span class="font-mono">{device_label(@active_radar.device_type)}</span>
+                  <span class={test_mode_badge_class(@active_radar.test_mode)}>
+                    {test_mode_label(@active_radar.test_mode)}
+                  </span>
+                </div>
+                <div :if={!@active_radar} class="mt-1 font-mono">No device connected</div>
+              </div>
+              <div id="device-config-selector" class="flex flex-wrap gap-2">
+                <button
+                  :for={device_type <- @supported_device_types}
+                  type="button"
+                  phx-click="select_device"
+                  phx-value-device={device_type}
+                  class={device_button_class(device_type, @selected_device_type, @active_radar)}
+                >
+                  {device_label(device_type)}
+                  <span
+                    :if={active_device?(device_type, @active_radar)}
+                    class="badge badge-success badge-sm"
+                  >
+                    active
+                  </span>
+                </button>
+              </div>
+            </div>
+
             <.form for={@form} phx-change="update_config" class="space-y-5">
               <.slider_input
                 field={@form[:authorized_speed]}
@@ -91,7 +132,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
                 field={@form[:max_dist]}
                 label="Max Distance (meters)"
                 min={@form[:min_dist].value}
-                max="15"
+                max={max_distance_m(@selected_device_type)}
                 step="0.1"
                 unit="m"
               />
@@ -122,7 +163,9 @@ defmodule RadarWeb.AdminRadarConfigLive do
               id="radar-canvas"
               phx-hook=".RadarCanvas"
               phx-update="ignore"
-              data-radar-config={Jason.encode!(RadarConfigs.config_payload(@config))}
+              data-radar-config={
+                Jason.encode!(RadarConfigs.config_payload(@debug_device_type, @debug_config))
+              }
               width="600"
               height="400"
               class="w-full rounded-lg"
@@ -238,6 +281,10 @@ defmodule RadarWeb.AdminRadarConfigLive do
               <p :if={!@last_target} class="opacity-70">No targets yet.</p>
               <div :if={@last_target} class="grid gap-3 lg:grid-cols-2">
                 <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+                  <span class="opacity-70">Device</span>
+                  <span class="font-mono">{device_label(@last_target.device_type)}</span>
+                  <span class="opacity-70">Mode</span>
+                  <span class="font-mono">{test_mode_label(@last_target.test_mode)}</span>
                   <span class="opacity-70">Speed</span>
                   <span class="font-mono">
                     {@last_target.speed} km/h ({@last_target.raw_speed_cm_s} cm/s)
@@ -264,9 +311,9 @@ defmodule RadarWeb.AdminRadarConfigLive do
                   <span class={debug_bool_class(@last_target.over_speed)}>
                     {yes_no(@last_target.over_speed)}
                   </span>
-                  <span class="opacity-70">RD03-D sentinel</span>
-                  <span class={debug_bool_class(!@last_target.suspicious_speed)}>
-                    {yes_no(@last_target.suspicious_speed)}
+                  <span class="opacity-70">{target_diagnostic_label(@last_target)}</span>
+                  <span class={target_diagnostic_class(@last_target)}>
+                    {target_diagnostic_value(@last_target)}
                   </span>
                   <span class="opacity-70">Cooldown</span>
                   <span class={debug_bool_class(@last_target.cooldown_elapsed)}>
@@ -303,6 +350,23 @@ defmodule RadarWeb.AdminRadarConfigLive do
                 <span class={uploader_status_class(@uploader_debug.connected)}>
                   {yes_no(@uploader_debug.connected)}
                 </span>
+              </div>
+            </div>
+            <div
+              id="uploader-device"
+              class="grid gap-2 rounded-lg bg-base-300 p-3 text-sm sm:grid-cols-2"
+            >
+              <div>
+                <span class="opacity-70">Device</span>
+                <div class="font-mono">
+                  {if @active_radar, do: device_label(@active_radar.device_type), else: "--"}
+                </div>
+              </div>
+              <div>
+                <span class="opacity-70">Mode</span>
+                <div class="font-mono">
+                  {if @active_radar, do: test_mode_label(@active_radar.test_mode), else: "--"}
+                </div>
               </div>
             </div>
 
@@ -350,16 +414,34 @@ defmodule RadarWeb.AdminRadarConfigLive do
     """
   end
 
+  def handle_event("select_device", %{"device" => device_type}, socket) do
+    if device_type in socket.assigns.supported_device_types do
+      config = RadarConfigs.get_config!(device_type)
+
+      {:noreply,
+       socket
+       |> assign(:selected_device_type, device_type)
+       |> assign(:config, config)
+       |> assign(:form, config_to_form(config))
+       |> maybe_follow_selected_debug_config(config)
+       |> push_debug_config_event()}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("update_config", %{"config" => params}, socket) do
     db_params = form_params_to_db(params)
+    device_type = socket.assigns.selected_device_type
 
-    case RadarConfigs.update_config(db_params) do
+    case RadarConfigs.update_config(device_type, db_params) do
       {:ok, config} ->
         {:noreply,
          socket
          |> assign(:config, config)
          |> assign(:form, config_to_form(config))
-         |> push_config_event(config)}
+         |> maybe_assign_debug_config(config)
+         |> push_debug_config_event()}
 
       {:error, _changeset} ->
         {:noreply, assign(socket, :form, to_form(params, as: :config))}
@@ -367,26 +449,47 @@ defmodule RadarWeb.AdminRadarConfigLive do
   end
 
   def handle_event("toggle_capture", _params, socket) do
-    case RadarConfigs.update_config(%{capture_paused: !socket.assigns.config.capture_paused}) do
+    device_type = socket.assigns.selected_device_type
+
+    case RadarConfigs.update_config(device_type, %{
+           capture_paused: !socket.assigns.config.capture_paused
+         }) do
       {:ok, config} ->
         {:noreply,
          socket
          |> assign(:config, config)
          |> assign(:form, config_to_form(config))
-         |> push_config_event(config)}
+         |> maybe_assign_debug_config(config)
+         |> push_debug_config_event()}
 
       {:error, _changeset} ->
         {:noreply, socket}
     end
   end
 
-  def handle_info({:config_updated, config}, socket) do
-    {:noreply,
-     socket
-     |> assign(:config, config)
-     |> assign(:form, config_to_form(config))
-     |> push_config_event(config)}
+  def handle_info({:config_updated, %{device_type: device_type} = config}, socket) do
+    socket =
+      if device_type == socket.assigns.selected_device_type do
+        socket
+        |> assign(:config, config)
+        |> assign(:form, config_to_form(config))
+      else
+        socket
+      end
+
+    socket =
+      if device_type == socket.assigns.debug_device_type do
+        socket
+        |> assign(:debug_config, config)
+        |> push_debug_config_event()
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
+
+  def handle_info({:config_updated, _config}, socket), do: {:noreply, socket}
 
   def handle_info({:new_infraction, _infraction}, socket) do
     {:noreply, assign(socket, :infraction_count, Infractions.count_infractions())}
@@ -413,7 +516,10 @@ defmodule RadarWeb.AdminRadarConfigLive do
             socket.assigns.uploader_debug.connected
         end
 
-      {:noreply, update(socket, :uploader_debug, &%{&1 | connected: connected})}
+      {:noreply,
+       socket
+       |> update(:uploader_debug, &%{&1 | connected: connected})
+       |> refresh_active_radar()}
     else
       {:noreply, socket}
     end
@@ -424,7 +530,8 @@ defmodule RadarWeb.AdminRadarConfigLive do
   end
 
   def handle_info({:target_data, data}, socket) do
-    target = normalize_target_data(data)
+    active_radar = ActiveRadar.current()
+    target = normalize_target_data(data, active_radar)
 
     socket =
       if socket.assigns.uploader_debug.connected do
@@ -435,6 +542,7 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
     {:noreply,
      socket
+     |> sync_debug_device(active_radar)
      |> assign(:last_target, target)
      |> push_event(
        "radar_point",
@@ -457,6 +565,12 @@ defmodule RadarWeb.AdminRadarConfigLive do
   end
 
   defp parse_page(_page), do: 1
+
+  defp selected_device_type(%{device_type: device_type}), do: device_type
+  defp selected_device_type(_active_radar), do: @default_device_type
+
+  defp debug_device_type(%{device_type: device_type}, _selected_device_type), do: device_type
+  defp debug_device_type(_active_radar, selected_device_type), do: selected_device_type
 
   defp config_to_form(config) do
     to_form(
@@ -485,6 +599,37 @@ defmodule RadarWeb.AdminRadarConfigLive do
     }
   end
 
+  defp active_device?(device_type, %{device_type: device_type}), do: true
+  defp active_device?(_device_type, _active_radar), do: false
+
+  defp max_distance_m("rd03d"), do: 15
+  defp max_distance_m("ld2451"), do: 100
+
+  defp device_label("rd03d"), do: "RD03-D"
+  defp device_label("ld2451"), do: "LD2451"
+  defp device_label(device_type), do: String.upcase(device_type)
+
+  defp device_button_class(device_type, selected_device_type, active_radar) do
+    selected? = device_type == selected_device_type
+    active? = active_device?(device_type, active_radar)
+
+    [
+      "btn btn-sm",
+      selected? && "btn-primary",
+      !selected? && active? && "btn-success btn-outline",
+      !selected? && !active? && "btn-ghost"
+    ]
+    |> Enum.filter(& &1)
+    |> Enum.join(" ")
+  end
+
+  defp test_mode_label(true), do: "Test mode"
+  defp test_mode_label(false), do: "Live hardware"
+  defp test_mode_label(_test_mode), do: "--"
+
+  defp test_mode_badge_class(true), do: "badge badge-warning"
+  defp test_mode_badge_class(false), do: "badge badge-info"
+
   defp capture_status(%{capture_paused: true}), do: "paused"
   defp capture_status(_config), do: "active"
 
@@ -507,6 +652,18 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   defp debug_bool_class(true), do: "font-mono text-success"
   defp debug_bool_class(false), do: "font-mono text-error"
+
+  defp target_diagnostic_label(%{device_type: "rd03d"}), do: "Speed sentinel"
+  defp target_diagnostic_label(%{device_type: "ld2451"}), do: "Radar diagnostic"
+  defp target_diagnostic_label(_target), do: "Radar diagnostic"
+
+  defp target_diagnostic_value(%{device_type: "rd03d", suspicious_speed: true}), do: "Detected"
+  defp target_diagnostic_value(%{device_type: "rd03d"}), do: "Clear"
+  defp target_diagnostic_value(%{suspicious_speed: true}), do: "Review target"
+  defp target_diagnostic_value(_target), do: "Normal"
+
+  defp target_diagnostic_class(%{suspicious_speed: suspicious_speed}),
+    do: debug_bool_class(!suspicious_speed)
 
   defp uploader_status_class(true), do: "badge badge-success"
   defp uploader_status_class(false), do: "badge badge-error"
@@ -532,8 +689,10 @@ defmodule RadarWeb.AdminRadarConfigLive do
 
   defp format_degrees(_value), do: "--"
 
-  defp normalize_target_data(data) do
+  defp normalize_target_data(data, active_radar) do
     %{
+      device_type: target_text(data, "device_type", active_device_type(active_radar)),
+      test_mode: target_test_mode(data, active_radar),
       raw_speed_cm_s: target_number(data, "raw_speed_cm_s", 0),
       speed: target_number(data, "speed", 0),
       suspicious_speed: target_bool(data, "suspicious_speed"),
@@ -552,30 +711,82 @@ defmodule RadarWeb.AdminRadarConfigLive do
     }
   end
 
-  defp last_known_target do
+  defp last_known_target(active_radar) do
     case RadarData.last_target() do
       nil -> nil
-      target -> normalize_target_data(target)
+      target -> normalize_target_data(target, active_radar)
     end
   end
 
   defp target_number(data, key, default) do
-    case Map.get(data, key, Map.get(data, String.to_existing_atom(key), default)) do
+    case target_value(data, key, default) do
       value when is_number(value) -> value
       _value -> default
     end
-  rescue
-    ArgumentError -> Map.get(data, key, default)
   end
 
   defp target_bool(data, key) do
-    case Map.get(data, key, Map.get(data, String.to_existing_atom(key), false)) do
-      true -> true
-      _value -> false
+    case target_bool_value(data, key) do
+      {:ok, value} -> value
+      :error -> false
     end
-  rescue
-    ArgumentError -> Map.get(data, key, false) == true
   end
+
+  defp target_test_mode(data, active_radar) do
+    case target_bool_value(data, "test_mode") do
+      {:ok, value} -> value
+      :error -> active_test_mode(active_radar)
+    end
+  end
+
+  defp target_text(data, key, default) do
+    case target_value(data, key, default) do
+      value when is_binary(value) -> value
+      _value -> default
+    end
+  end
+
+  defp target_bool_value(data, key) do
+    case target_lookup(data, key) do
+      {:ok, true} -> {:ok, true}
+      {:ok, _value} -> {:ok, false}
+      :error -> :error
+    end
+  end
+
+  defp target_value(data, key, default) do
+    case target_lookup(data, key) do
+      {:ok, value} -> value
+      :error -> default
+    end
+  end
+
+  defp target_lookup(data, key) do
+    atom_key = existing_atom_key(key)
+
+    cond do
+      Map.has_key?(data, key) ->
+        {:ok, Map.fetch!(data, key)}
+
+      atom_key && Map.has_key?(data, atom_key) ->
+        {:ok, Map.fetch!(data, atom_key)}
+
+      true ->
+        :error
+    end
+  end
+
+  defp existing_atom_key(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp active_device_type(%{device_type: device_type}), do: device_type
+  defp active_device_type(_active_radar), do: @default_device_type
+
+  defp active_test_mode(%{test_mode: test_mode}) when is_boolean(test_mode), do: test_mode
+  defp active_test_mode(_active_radar), do: nil
 
   defp append_uploader_log(debug, log) do
     logs =
@@ -602,6 +813,27 @@ defmodule RadarWeb.AdminRadarConfigLive do
       level: "info",
       message: inspect(log)
     }
+  end
+
+  defp refresh_active_radar(socket) do
+    active_radar = ActiveRadar.current()
+
+    sync_debug_device(socket, active_radar)
+  end
+
+  defp sync_debug_device(socket, active_radar) do
+    debug_device_type = debug_device_type(active_radar, socket.assigns.selected_device_type)
+
+    socket = assign(socket, :active_radar, active_radar)
+
+    if debug_device_type == socket.assigns.debug_device_type do
+      socket
+    else
+      socket
+      |> assign(:debug_device_type, debug_device_type)
+      |> assign(:debug_config, RadarConfigs.get_config!(debug_device_type))
+      |> push_debug_config_event()
+    end
   end
 
   attr :field, Phoenix.HTML.FormField, required: true
@@ -634,8 +866,30 @@ defmodule RadarWeb.AdminRadarConfigLive do
     """
   end
 
-  defp push_config_event(socket, config) do
-    push_event(socket, "radar_config", RadarConfigs.config_payload(config))
+  defp maybe_assign_debug_config(socket, %{device_type: device_type} = config) do
+    if device_type == socket.assigns.debug_device_type do
+      assign(socket, :debug_config, config)
+    else
+      socket
+    end
+  end
+
+  defp maybe_follow_selected_debug_config(socket, config) do
+    if socket.assigns.active_radar do
+      socket
+    else
+      socket
+      |> assign(:debug_device_type, socket.assigns.selected_device_type)
+      |> assign(:debug_config, config)
+    end
+  end
+
+  defp push_debug_config_event(socket) do
+    push_event(
+      socket,
+      "radar_config",
+      RadarConfigs.config_payload(socket.assigns.debug_device_type, socket.assigns.debug_config)
+    )
   end
 
   defp parse_float(val) when is_binary(val) do

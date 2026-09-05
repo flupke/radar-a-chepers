@@ -89,8 +89,8 @@ impl Actor for FakeRadarReader {
                 let message = format!(
                     "EVENTS: TARGET: {} {} {}",
                     target.speed_cm_s(),
-                    target.x as i16,
-                    target.y as i16,
+                    target.x as i32,
+                    target.y as i32,
                 );
                 self.radar_input.process_log_message(message);
                 target.step(dt, &mut rng);

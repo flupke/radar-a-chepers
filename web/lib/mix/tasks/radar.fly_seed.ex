@@ -18,10 +18,15 @@ defmodule Mix.Tasks.Radar.FlySeed do
     Application.ensure_all_started(:req)
 
     {opts, _, _} =
-      OptionParser.parse(args, strict: [url: :string, api_key: :string])
+      OptionParser.parse(args, strict: [url: :string, api_key: :string, radar_device: :string])
 
     base_url = opts[:url] || raise "Missing --url"
     api_key = opts[:api_key] || raise "Missing --api-key"
+    device_type = opts[:radar_device] || raise "Missing --radar-device"
+
+    unless device_type in Radar.RadarConfigs.supported_device_types() do
+      raise "Unsupported --radar-device: #{device_type}"
+    end
 
     images_dir = Path.join([File.cwd!(), "priv", "static", "images"])
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
@@ -47,7 +52,8 @@ defmodule Mix.Tasks.Radar.FlySeed do
              headers: [{"x-api-key", api_key}],
              form_multipart: [
                photo: {image_data, filename: "seed_#{i}.jpg", content_type: "image/jpeg"},
-               infraction: infraction_json
+               infraction: infraction_json,
+               device_type: device_type
              ]
            ) do
         {:ok, %{status: status, body: body}} when status in 200..299 ->

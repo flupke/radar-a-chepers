@@ -11,7 +11,7 @@ This project has three runtime pieces:
 Deploy the uploader and ESP firmware to the Pi:
 
 ```sh
-./install.sh
+./install.sh --radar-device rd03d
 ```
 
 Defaults:
@@ -19,6 +19,11 @@ Defaults:
 - SSH host: `rshep.local`
 - ESP USB serial for flashing and firmware logs: `/dev/ttyACM0`
 - Pi-to-ESP config UART: `/dev/serial0`
+- Radar device: explicit `rd03d` or `ld2451` via `--radar-device`
+
+The selected device controls both the firmware Cargo feature and uploader identity.
+LD2451 software support is implemented; physical validation is still required.
+See [LD2451](#ld2451) for wiring, protocol assumptions and verification.
 
 The install script always rebuilds the ESP firmware, flashes it before updating the uploader service, and restarts `radar-uploader.service`.
 
@@ -39,7 +44,7 @@ make deploy-all
 Use this when working on the admin UI without hardware:
 
 ```sh
-./start.sh --fake-people --local-web
+./start.sh --radar-device rd03d --fake-people --local-web
 ```
 
 This starts Phoenix locally and runs the uploader in `--test-mode` against `http://localhost:4000`.
@@ -49,7 +54,7 @@ This starts Phoenix locally and runs the uploader in `--test-mode` against `http
 Use this when debugging the real radar through the local admin page:
 
 ```sh
-./start.sh --local-web --remote-uploader rshep.local
+./start.sh --radar-device rd03d --local-web --remote-uploader rshep.local
 ```
 
 This starts Phoenix locally, detects this machine's LAN IPv4 address, stops the Pi's normal `radar-uploader.service`, and runs the installed Pi uploader over SSH against the local web server.
@@ -57,7 +62,7 @@ This starts Phoenix locally, detects this machine's LAN IPv4 address, stops the 
 If LAN IP detection is wrong, override it:
 
 ```sh
-LOCAL_API_ENDPOINT_LAN=http://192.168.1.65:4000 ./start.sh --local-web --remote-uploader rshep.local
+LOCAL_API_ENDPOINT_LAN=http://192.168.1.65:4000 ./start.sh --radar-device rd03d --local-web --remote-uploader rshep.local
 ```
 
 When the local `start.sh` process exits, it should restart the normal Pi service. If cleanup is interrupted, restore it manually:
@@ -120,7 +125,7 @@ When the camera battery is dead, continue radar-only debugging by pausing captur
 Use this when tracking disappears while someone runs through the radar field. Deploy the firmware, then follow the uploader logs while reproducing the dropout:
 
 ```sh
-./install.sh
+./install.sh --radar-device rd03d
 ssh rshep.local 'journalctl -u radar-uploader.service -f --output=cat' | rg --line-buffered 'Radar raw frame|Radar raw target|Capture check|EVENTS: TRIGGER'
 ```
 
@@ -133,3 +138,50 @@ The ESP logs raw 30-byte RD03-D frames only around useful transitions:
 If running produces `state=empty` or `state=suspicious-speed` while the ESP is still receiving valid raw frames, the dropout is inside the RD03-D module/tracker rather than the web display or uploader pipeline.
 
 For field tests with fast people, use the full practical RD03-D range before blaming the trigger filters. The current useful starting point is `max_dist=8000` mm; shorter limits can reject the long-range jumps the module reports when its tracker starts to fail.
+
+## LD2451
+
+Build or deploy explicitly for the new module:
+
+```sh
+(cd radar && cargo build --no-default-features --features ld2451)
+./install.sh --radar-device ld2451
+./start.sh --radar-device ld2451 --local-web --remote-uploader rshep.local
+```
+
+For UI development without hardware:
+
+```sh
+./start.sh --radar-device ld2451 --fake-people --local-web
+```
+
+The radar UART uses 115200 baud (RD03-D remains at 256000). Connect module TX
+(pin 4) to ESP GPIO18, and module RX (pin 5) to ESP GPIO17. Supply VIN (pin 1)
+with 5V from a source capable of more than 200mA; connect GND (pin 2) to common
+ground. UART signal levels are 3.3V. Pi config UART and GPIO42 trigger wiring
+stay as described above. See the linked manufacturer manuals and exact
+[protocol assumptions](../radar/fixtures/ld2451/README.md).
+
+On boot, firmware configures detection over 100m in both directions, with a
+0km/h minimum. Capture still uses the selected device's stored application
+settings: its initial maximum capture distance is 10m. Adjust those settings
+in the admin page for your field test; changing them does not reprogram the
+module's sensitivity.
+
+Hardware verification:
+
+1. Deploy the web and uploader changes together: photo uploads now require
+   device identity. Select LD2451 in the admin page and pause capture initially.
+2. Confirm logs identify `device=ld2451 baud=115200`, see a target header during
+   the passive probe, and report successful LD2451 configuration.
+3. Save real empty/moving UART captures and verify distances, angles and speed
+   against known motion. The manufacturer's direction table contradicts its
+   example: the parser follows table 9 (1 = approaching), pending this check.
+4. Change a capture setting and confirm `ESP acknowledged trigger config`.
+   Confirm target events and LD2451 raw diagnostics reach the admin page.
+5. With the camera ready, resume capture. Verify a pass inside the configured
+   range/aperture and above the limit emits `EVENTS: TRIGGER`, pulses GPIO42,
+   and delivers a photo. Check pause, cooldown and out-of-range rejection.
+
+Software fixtures are synthetic. No physical capture, flashing, GPIO or camera
+validation has been performed for LD2451 in this checkout.

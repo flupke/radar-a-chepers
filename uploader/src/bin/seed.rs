@@ -1,6 +1,7 @@
 use camino::Utf8PathBuf;
 use clap::Parser;
 use std::path::Path;
+use uploader::config_channel::RadarDeviceType;
 use uploader::infraction_recorder::Infraction;
 use uploader::infraction_uploader::{InfractionUploader, InfractionUploaderCommand};
 
@@ -12,6 +13,9 @@ struct Args {
 
     #[arg(short, long, default_value = "radar-dev-key")]
     api_key: String,
+
+    #[arg(long, value_enum)]
+    radar_device: RadarDeviceType,
 }
 
 const LOCATIONS: &[&str] = &[
@@ -65,6 +69,7 @@ async fn main() {
                 args.api_endpoint,
                 args.api_key,
                 false,
+                args.radar_device,
             );
             uploader
                 .port
