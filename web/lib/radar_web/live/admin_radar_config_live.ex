@@ -323,10 +323,6 @@ defmodule RadarWeb.AdminRadarConfigLive do
                   <span class={debug_bool_class(!@last_target.capture_paused)}>
                     {yes_no(@last_target.capture_paused)}
                   </span>
-                  <span class="opacity-70">Capture busy</span>
-                  <span class={debug_bool_class(!@last_target.capture_in_progress)}>
-                    {yes_no(@last_target.capture_in_progress)}
-                  </span>
                   <span class="opacity-70">Would capture</span>
                   <span class={debug_bool_class(@last_target.would_trigger)}>
                     {yes_no(@last_target.would_trigger)}
@@ -705,7 +701,6 @@ defmodule RadarWeb.AdminRadarConfigLive do
       over_speed: target_bool(data, "over_speed"),
       cooldown_elapsed: target_bool(data, "cooldown_elapsed"),
       capture_paused: target_bool(data, "capture_paused"),
-      capture_in_progress: target_bool(data, "capture_in_progress"),
       would_trigger: target_bool(data, "would_trigger"),
       triggered: target_bool(data, "triggered")
     }

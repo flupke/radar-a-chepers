@@ -45,7 +45,6 @@ pub struct TargetData {
     pub over_speed: bool,
     pub cooldown_elapsed: bool,
     pub capture_paused: bool,
-    pub capture_in_progress: bool,
     pub would_trigger: bool,
     pub triggered: bool,
 }
@@ -143,7 +142,6 @@ struct InfractionRecorderInner {
     trigger_cooldown_ms: i64,
     aperture_angle: i16,
     capture_paused: bool,
-    capture_in_progress: bool,
     last_capture_attempt_at: Option<DateTime<Utc>>,
     photos_dir: Utf8PathBuf,
     uploader_port: ActorPort<InfractionUploaderCommand>,
@@ -157,11 +155,7 @@ struct InfractionRecorderInner {
 impl Actor for InfractionRecorderInner {
     type Command = InfractionRecorderCommand;
 
-    async fn event_loop(
-        mut self,
-        port: ActorPort<Self::Command>,
-        mut command_receiver: mpsc::UnboundedReceiver<Self::Command>,
-    ) {
+    async fn event_loop(mut self, mut command_receiver: mpsc::UnboundedReceiver<Self::Command>) {
         loop {
             tokio::select! {
                 command = command_receiver.recv() => {
@@ -196,9 +190,7 @@ impl Actor for InfractionRecorderInner {
 
                     let target = self.target_rx.borrow_and_update().clone();
                     if let Some(target) = target {
-                        if let Err(err) = self.update_target(target, Some(&port)) {
-                            log::error!("Failed to update infraction recorder: {err}");
-                        }
+                        self.update_target(target);
                     }
                 }
                 trigger = self.trigger_rx.recv() => {
@@ -206,7 +198,7 @@ impl Actor for InfractionRecorderInner {
                         break;
                     };
 
-                    if let Err(err) = self.record_trigger(trigger, Some(&port)) {
+                    if let Err(err) = self.record_trigger(trigger) {
                         log::error!("Failed to record radar trigger: {err}");
                     }
                 }
@@ -233,7 +225,6 @@ impl InfractionRecorderInner {
             trigger_cooldown_ms: 1000,
             aperture_angle: 90,
             capture_paused: false,
-            capture_in_progress: false,
             photos_dir,
             uploader_port,
             target_data_tx,
@@ -245,11 +236,7 @@ impl InfractionRecorderInner {
         }
     }
 
-    fn update_target(
-        &mut self,
-        target: RawTarget,
-        _port: Option<&ActorPort<InfractionRecorderCommand>>,
-    ) -> Result<()> {
+    fn update_target(&self, target: RawTarget) {
         let target_data = self.target_data(target, false);
         let would_trigger = target_data.would_trigger;
         let _ = self.target_data_tx.send(target_data);
@@ -257,8 +244,6 @@ impl InfractionRecorderInner {
         if would_trigger && self.capture_paused {
             log::debug!("Capture paused: capture conditions met, not taking picture");
         }
-
-        Ok(())
     }
 
     fn target_data(&self, target: RawTarget, triggered: bool) -> TargetData {
@@ -300,17 +285,12 @@ impl InfractionRecorderInner {
             over_speed,
             cooldown_elapsed,
             capture_paused: self.capture_paused,
-            capture_in_progress: self.capture_in_progress,
             would_trigger,
             triggered,
         }
     }
 
-    fn record_trigger(
-        &mut self,
-        trigger: RawTarget,
-        _port: Option<&ActorPort<InfractionRecorderCommand>>,
-    ) -> Result<()> {
+    fn record_trigger(&mut self, trigger: RawTarget) -> Result<()> {
         let mut target_data = self.target_data(trigger, false);
         target_data.triggered = target_data.would_trigger && !self.capture_paused;
         let _ = self.target_data_tx.send(target_data.clone());
@@ -450,8 +430,7 @@ impl Infraction {
 mod tests {
     use super::*;
     use crate::{
-        actor::{Actor, ActorPort},
-        config_channel::RadarDeviceType,
+        actor::Actor, config_channel::RadarDeviceType,
         infraction_uploader::InfractionUploaderCommand,
     };
     use tokio::sync::mpsc;
@@ -461,11 +440,7 @@ mod tests {
     impl Actor for NoopUploader {
         type Command = InfractionUploaderCommand;
 
-        async fn event_loop(
-            self,
-            _port: ActorPort<Self::Command>,
-            mut command_receiver: mpsc::UnboundedReceiver<Self::Command>,
-        ) {
+        async fn event_loop(self, mut command_receiver: mpsc::UnboundedReceiver<Self::Command>) {
             while command_receiver.recv().await.is_some() {}
         }
     }
@@ -513,7 +488,6 @@ mod tests {
             photos_dir.clone(),
             "http://localhost".to_string(),
             "api-key".to_string(),
-            RadarDeviceType::Rd03d,
         );
         let recorder = InfractionRecorder::new(
             authorized_speed,
@@ -537,14 +511,11 @@ mod tests {
 
                 for raw_speed_cm_s in [248, 256, -248, -256] {
                     recorder
-                        .record_trigger(
-                            RawTarget {
-                                raw_speed_cm_s,
-                                x: 0,
-                                y: 1000,
-                            },
-                            None,
-                        )
+                        .record_trigger(RawTarget {
+                            raw_speed_cm_s,
+                            x: 0,
+                            y: 1000,
+                        })
                         .unwrap();
                     let target = target_rx.try_recv().unwrap();
                     assert_eq!(target.speed, 9);
@@ -697,9 +668,7 @@ mod tests {
             .run_until(async {
                 let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
 
-                recorder
-                    .update_target(raw_target(150, 0, 100), None)
-                    .unwrap();
+                recorder.update_target(raw_target(150, 0, 100));
 
                 let target_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(target_data.speed, 5);
@@ -707,9 +676,7 @@ mod tests {
                 assert!(!target_data.triggered);
                 assert_eq!(saved_infractions(&photos_dir).len(), 0);
 
-                recorder
-                    .record_trigger(raw_target(150, 0, 100), None)
-                    .unwrap();
+                recorder.record_trigger(raw_target(150, 0, 100)).unwrap();
 
                 let trigger_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(trigger_data.speed, 5);
@@ -731,9 +698,7 @@ mod tests {
             .run_until(async {
                 let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(25);
 
-                recorder
-                    .update_target(raw_target(248, 0, 100), None)
-                    .unwrap();
+                recorder.update_target(raw_target(248, 0, 100));
 
                 let target_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(target_data.raw_speed_cm_s, 248);
@@ -742,9 +707,7 @@ mod tests {
                 assert!(target_data.would_trigger);
                 assert!(!target_data.triggered);
 
-                recorder
-                    .record_trigger(raw_target(-256, 0, 100), None)
-                    .unwrap();
+                recorder.record_trigger(raw_target(-256, 0, 100)).unwrap();
 
                 let trigger_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(trigger_data.raw_speed_cm_s, -256);
@@ -769,12 +732,8 @@ mod tests {
                 let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
                 recorder.trigger_cooldown_ms = 30_000;
 
-                recorder
-                    .record_trigger(raw_target(150, 0, 100), None)
-                    .unwrap();
-                recorder
-                    .record_trigger(raw_target(200, 0, 100), None)
-                    .unwrap();
+                recorder.record_trigger(raw_target(150, 0, 100)).unwrap();
+                recorder.record_trigger(raw_target(200, 0, 100)).unwrap();
 
                 let first_target = target_data_rx.try_recv().unwrap();
                 let second_target = target_data_rx.try_recv().unwrap();
@@ -794,18 +753,14 @@ mod tests {
             .run_until(async {
                 let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
 
-                recorder
-                    .update_target(raw_target(-150, 0, 100), None)
-                    .unwrap();
+                recorder.update_target(raw_target(-150, 0, 100));
 
                 let target_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(target_data.speed, 5);
                 assert!(target_data.would_trigger);
                 assert!(!target_data.triggered);
 
-                recorder
-                    .record_trigger(raw_target(-150, 0, 100), None)
-                    .unwrap();
+                recorder.record_trigger(raw_target(-150, 0, 100)).unwrap();
 
                 let trigger_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(trigger_data.speed, 5);
@@ -827,12 +782,8 @@ mod tests {
                 let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
                 recorder.trigger_cooldown_ms = 30_000;
 
-                recorder
-                    .record_trigger(raw_target(150, 0, 100), None)
-                    .unwrap();
-                recorder
-                    .update_target(raw_target(200, 0, 100), None)
-                    .unwrap();
+                recorder.record_trigger(raw_target(150, 0, 100)).unwrap();
+                recorder.update_target(raw_target(200, 0, 100));
 
                 let first_target = target_data_rx.try_recv().unwrap();
                 let second_target = target_data_rx.try_recv().unwrap();
@@ -858,45 +809,20 @@ mod tests {
                 recorder.photos_dir = recorder.photos_dir.join("missing");
 
                 let err = recorder
-                    .record_trigger(raw_target(150, 0, 100), None)
+                    .record_trigger(raw_target(150, 0, 100))
                     .unwrap_err();
                 assert!(
                     err.to_string().contains("No such file")
                         || err.to_string().contains("not found")
                 );
 
-                recorder
-                    .update_target(raw_target(200, 0, 100), None)
-                    .unwrap();
+                recorder.update_target(raw_target(200, 0, 100));
 
                 let first_target = target_data_rx.try_recv().unwrap();
                 let second_target = target_data_rx.try_recv().unwrap();
                 assert!(first_target.triggered);
                 assert!(!second_target.triggered);
                 assert!(!second_target.cooldown_elapsed);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn photo_retrieval_backlog_does_not_block_new_triggers() {
-        let local = tokio::task::LocalSet::new();
-
-        local
-            .run_until(async {
-                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
-                recorder.capture_in_progress = true;
-                recorder.last_capture_attempt_at = Some(Utc::now() - TimeDelta::seconds(60));
-
-                recorder
-                    .record_trigger(raw_target(200, 0, 100), None)
-                    .unwrap();
-
-                let target_data = target_data_rx.try_recv().unwrap();
-                assert_eq!(target_data.speed, 7);
-                assert!(target_data.capture_in_progress);
-                assert!(target_data.triggered);
-                assert_eq!(saved_infractions(&photos_dir).len(), 1);
             })
             .await;
     }
@@ -910,9 +836,7 @@ mod tests {
                 let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(25);
                 recorder.capture_paused = true;
 
-                recorder
-                    .update_target(raw_target(2222, 0, 100), None)
-                    .unwrap();
+                recorder.update_target(raw_target(2222, 0, 100));
 
                 let target_data = target_data_rx.try_recv().unwrap();
                 assert_eq!(target_data.speed, 80);

@@ -49,6 +49,14 @@ Use this when working on the admin UI without hardware:
 
 This starts Phoenix locally and runs the uploader in `--test-mode` against `http://localhost:4000`.
 
+## Local Uploader With USB Hardware
+
+With the ESP connected to this computer, `./start.sh --radar-device ld2451`
+always builds and flashes the selected firmware before starting the uploader.
+`SERIAL_PORT` selects the USB device; `CONFIG_SERIAL_PORT` selects the config
+UART. The uploader decodes logs with the same ELF that was just flashed.
+Firmware freshness is delegated to Cargo, not inferred from file timestamps.
+
 ## Local Web With Real Pi Hardware
 
 Use this when debugging the real radar through the local admin page:
@@ -58,6 +66,8 @@ Use this when debugging the real radar through the local admin page:
 ```
 
 This starts Phoenix locally, detects this machine's LAN IPv4 address, stops the Pi's normal `radar-uploader.service`, and runs the installed Pi uploader over SSH against the local web server.
+Deploy that device with `./install.sh --radar-device <device>` first; remote
+`start.sh` uses the firmware already installed on the Pi.
 
 If LAN IP detection is wrong, override it:
 
@@ -170,8 +180,9 @@ module's sensitivity.
 
 Hardware verification:
 
-1. Deploy the web and uploader changes together: photo uploads now require
-   device identity. Select LD2451 in the admin page and pause capture initially.
+1. Deploy the web and uploader changes. Select LD2451 in the admin page and
+   pause capture initially. Pausing stops new captures; already captured photos
+   can still upload.
 2. Confirm logs identify `device=ld2451 baud=115200`, see a target header during
    the passive probe, and report successful LD2451 configuration.
 3. Save real empty/moving UART captures and verify distances, angles and speed

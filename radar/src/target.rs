@@ -24,7 +24,7 @@ pub struct Target {
     // Y coordinate in mm
     pub y: i16,
 
-    // Speed in km/h
+    // Raw speed in cm/s
     pub speed: i16,
 
     // Distance resolution in mm
@@ -67,14 +67,6 @@ pub struct TargetsList {
 }
 
 impl TargetsList {
-    pub fn max_speed(&self) -> i16 {
-        self.targets
-            .iter()
-            .map(|t| t.as_ref().map_or(0, |t| -t.speed))
-            .max()
-            .unwrap_or(0)
-    }
-
     pub fn targets(&self) -> &[Option<Target>] {
         &self.targets
     }

@@ -46,7 +46,7 @@ impl Actor for RadarReader {
 
     async fn event_loop(
         self,
-        _port: crate::actor::ActorPort<Self::Command>,
+
         mut command_receiver: tokio::sync::mpsc::UnboundedReceiver<Self::Command>,
     ) {
         let (host_command_tx, host_command_rx) = mpsc::channel();

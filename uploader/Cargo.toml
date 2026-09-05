@@ -11,11 +11,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 env_logger = "0.9"
 log = "0.4"
-notify = "6.0.0"
 clap = { version = "4.0", features = ["derive"] }
 defmt-decoder = "1.0.0"
 chrono = { version = "0.4.41", features = ["serde"] }
-xshell = "0.2.7"
 duct = "1.1.0"
 eyre = "0.6.12"
 camino = "1.1.11"

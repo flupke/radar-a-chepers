@@ -3,7 +3,7 @@ defmodule RadarWeb.Api.PhotoController do
 
   require Logger
 
-  alias Radar.{Infractions, Photos, RadarConfigs}
+  alias Radar.{Infractions, Photos}
 
   def create(conn, params) do
     case authenticate_api_key(conn) do
@@ -34,10 +34,9 @@ defmodule RadarWeb.Api.PhotoController do
 
   defp handle_photo_upload(
          conn,
-         %{"photo" => photo_upload, "infraction" => infraction_data} = params
+         %{"photo" => photo_upload, "infraction" => infraction_data}
        ) do
-    with :ok <- ensure_capture_active(params["device_type"]),
-         {:ok, decoded_infraction} <- decode_infraction_data(infraction_data),
+    with {:ok, decoded_infraction} <- decode_infraction_data(infraction_data),
          {:ok, file_data} <- read_upload_file(photo_upload),
          {:ok, photo} <- create_photo_with_infraction(photo_upload, file_data, decoded_infraction) do
       conn
@@ -66,19 +65,6 @@ defmodule RadarWeb.Api.PhotoController do
     conn
     |> put_status(:bad_request)
     |> json(%{error: "Missing photo or infraction data"})
-  end
-
-  defp ensure_capture_active(device_type) do
-    cond do
-      device_type not in RadarConfigs.supported_device_types() ->
-        {:error, "A supported device_type is required"}
-
-      RadarConfigs.get_config!(device_type).capture_paused ->
-        {:error, "Radar capture is paused"}
-
-      true ->
-        :ok
-    end
   end
 
   defp read_upload_file(%Plug.Upload{path: path}) do

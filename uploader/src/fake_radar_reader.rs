@@ -68,7 +68,7 @@ impl Actor for FakeRadarReader {
 
     async fn event_loop(
         self,
-        _port: crate::actor::ActorPort<Self::Command>,
+
         _command_receiver: tokio::sync::mpsc::UnboundedReceiver<Self::Command>,
     ) {
         log::info!("Fake radar reader started — generating synthetic data");

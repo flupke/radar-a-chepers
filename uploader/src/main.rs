@@ -110,7 +110,6 @@ async fn main() -> Result<()> {
                 args.api_endpoint,
                 args.api_key,
                 !test_mode,
-                radar_device,
             );
             let infraction_recorder = InfractionRecorder::new(
                 25,

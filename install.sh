@@ -15,7 +15,7 @@ ESPFLASH_BINARY="${ROOT_DIR}/.nix/espflash/${UPLOADER_TARGET}/bin/espflash"
 
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
 CONFIG_SERIAL_PORT="${CONFIG_SERIAL_PORT:-/dev/serial0}"
-RADAR_BINARY="${RADAR_BINARY:-${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers}"
+RADAR_BINARY="${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers"
 RADAR_DEVICE="${RADAR_DEVICE:-}"
 
 REMOTE="${REMOTE:-rshep.local}"
@@ -58,8 +58,6 @@ Options:
                               Default: ${CONFIG_SERIAL_PORT}
   --radar-device DEVICE       Active radar device for this uploader connection: rd03d or ld2451.
                               RADAR_DEVICE can also provide this value.
-  --radar-binary PATH         Local radar firmware ELF to copy.
-                              Default: ${RADAR_BINARY}
   --remote-app-dir PATH       Remote install directory. Default: ${REMOTE_APP_DIR}
   --remote-env-file PATH      Remote environment file. Default: ${REMOTE_ENV_FILE}
   --remote-infractions PATH   Remote infractions directory. Default: ${REMOTE_INFRACTIONS_DIR}
@@ -353,11 +351,6 @@ while [ "$#" -gt 0 ]; do
     --radar-device)
       require_option_value "$1" "${2:-}"
       RADAR_DEVICE="$2"
-      shift
-      ;;
-    --radar-binary)
-      require_option_value "$1" "${2:-}"
-      RADAR_BINARY="$2"
       shift
       ;;
     --remote-app-dir)

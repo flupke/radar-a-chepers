@@ -113,7 +113,6 @@ defmodule RadarWeb.AdminLiveTest do
         "suspicious_speed" => true,
         "cooldown_elapsed" => true,
         "capture_paused" => false,
-        "capture_in_progress" => false,
         "would_trigger" => false,
         "triggered" => false
       }
@@ -154,7 +153,6 @@ defmodule RadarWeb.AdminLiveTest do
         "suspicious_speed" => false,
         "cooldown_elapsed" => true,
         "capture_paused" => false,
-        "capture_in_progress" => false,
         "would_trigger" => false,
         "triggered" => false
       }

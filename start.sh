@@ -14,7 +14,7 @@ LOCAL_API_ENDPOINT="${LOCAL_API_ENDPOINT%/}"
 
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
 CONFIG_SERIAL_PORT="${CONFIG_SERIAL_PORT:-/dev/serial0}"
-RADAR_BINARY="${RADAR_BINARY:-${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers}"
+RADAR_BINARY="${ROOT_DIR}/radar/target/xtensa-esp32s3-none-elf/debug/radar-a-chepers"
 RADAR_DEVICE="${RADAR_DEVICE:-}"
 
 SSH_BIN="${SSH_BIN:-ssh}"
@@ -229,19 +229,9 @@ local_api_endpoint_for_lan() {
   printf 'http://%s:%s\n' "$(url_host "$(detect_lan_host)")" "$(local_api_port)"
 }
 
-ensure_radar_binary() {
-  local newer_source
-
-  if [ ! -f "$RADAR_BINARY" ]; then
-    newer_source=1
-  else
-    newer_source="$(find "$ROOT_DIR/radar" -name '*.rs' -newer "$RADAR_BINARY" -print -quit)"
-  fi
-
-  if [ -n "$newer_source" ]; then
-    echo "==> Building and flashing radar firmware..."
-    (cd "$ROOT_DIR/radar" && cargo espflash flash)
-  fi
+flash_radar() {
+  echo "==> Building and flashing ${RADAR_DEVICE} radar firmware..."
+  (cd "$ROOT_DIR/radar" && cargo espflash flash --no-default-features --features "$RADAR_DEVICE" --port "$SERIAL_PORT")
 }
 
 start_uploader() {
@@ -270,7 +260,7 @@ start_uploader() {
   if [ "$FAKE_PEOPLE" = 1 ]; then
     args+=(--test-mode)
   else
-    ensure_radar_binary
+    flash_radar
     args+=(
       --serial-port "$SERIAL_PORT"
       --config-serial-port "$CONFIG_SERIAL_PORT"

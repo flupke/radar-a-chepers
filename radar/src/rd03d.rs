@@ -100,9 +100,9 @@ impl RadarModule for Rd03d {
 
     fn init_command(&self, index: usize) -> Option<&'static [u8]> {
         match index {
-            0 => Some(OPEN_COMMAND_MODE.get()),
-            1 => Some(SET_SINGLE_TARGET.get()),
-            2 => Some(CLOSE_COMMAND_MODE.get()),
+            0 => Some(OPEN_COMMAND_MODE),
+            1 => Some(SET_SINGLE_TARGET),
+            2 => Some(CLOSE_COMMAND_MODE),
             _ => None,
         }
     }

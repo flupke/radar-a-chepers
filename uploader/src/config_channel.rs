@@ -258,7 +258,6 @@ fn target_data_payload(data: &TargetData) -> Value {
         "over_speed": data.over_speed,
         "cooldown_elapsed": data.cooldown_elapsed,
         "capture_paused": data.capture_paused,
-        "capture_in_progress": data.capture_in_progress,
         "would_trigger": data.would_trigger,
         "triggered": data.triggered,
     })

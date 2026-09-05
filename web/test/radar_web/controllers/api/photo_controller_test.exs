@@ -7,7 +7,6 @@ defmodule RadarWeb.Api.PhotoControllerTest do
 
   @valid_api_key "radar-dev-key"
   @invalid_api_key "invalid-key"
-  @device_type "rd03d"
 
   @valid_infraction_data %{
     "datetime_taken" => "2024-01-15T14:30:00",
@@ -56,7 +55,6 @@ defmodule RadarWeb.Api.PhotoControllerTest do
         conn
         |> put_req_header("x-api-key", @invalid_api_key)
         |> post("/api/photos", %{
-          "device_type" => @device_type,
           "photo" => upload,
           "infraction" => @valid_infraction_data
         })
@@ -71,7 +69,6 @@ defmodule RadarWeb.Api.PhotoControllerTest do
         conn
         |> put_req_header("x-api-key", @valid_api_key)
         |> post("/api/photos", %{
-          "device_type" => @device_type,
           "photo" => upload,
           "infraction" => @valid_infraction_data
         })
@@ -137,7 +134,6 @@ defmodule RadarWeb.Api.PhotoControllerTest do
         conn
         |> put_req_header("x-api-key", @valid_api_key)
         |> post("/api/photos", %{
-          "device_type" => @device_type,
           "photo" => upload,
           "infraction" => @valid_infraction_data
         })
@@ -156,61 +152,25 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert {:error, :enoent} = Radar.MockS3Client.get_object(infraction_json_key)
     end
 
-    test "rejects photo uploads while capture is paused", %{conn: conn, upload: upload} do
-      assert {:ok, _config} = RadarConfigs.update_config(@device_type, %{capture_paused: true})
+    test "accepts already captured photos while all radar capture is paused", %{
+      conn: conn,
+      upload: upload
+    } do
+      for device_type <- RadarConfigs.supported_device_types() do
+        assert {:ok, _} = RadarConfigs.update_config(device_type, %{capture_paused: true})
+      end
 
       conn =
         conn
         |> put_req_header("x-api-key", @valid_api_key)
         |> post("/api/photos", %{
-          "device_type" => @device_type,
           "photo" => upload,
           "infraction" => @valid_infraction_data
         })
 
-      assert json_response(conn, 422)["error"] == "Radar capture is paused"
-      assert Repo.all(Radar.Photo) == []
-      assert Infractions.list_recent_infractions() == []
-    end
-
-    test "checks the uploading device's pause state independently", %{conn: conn, upload: upload} do
-      for device_type <- RadarConfigs.supported_device_types() do
-        other = if device_type == "rd03d", do: "ld2451", else: "rd03d"
-        assert {:ok, _} = RadarConfigs.update_config(other, %{capture_paused: true})
-        assert {:ok, _} = RadarConfigs.update_config(device_type, %{capture_paused: false})
-
-        params = %{
-          "device_type" => device_type,
-          "photo" => upload,
-          "infraction" => @valid_infraction_data
-        }
-
-        response =
-          conn |> put_req_header("x-api-key", @valid_api_key) |> post("/api/photos", params)
-
-        assert json_response(response, 201)["id"]
-
-        assert {:ok, _} = RadarConfigs.update_config(device_type, %{capture_paused: true})
-
-        response =
-          conn |> put_req_header("x-api-key", @valid_api_key) |> post("/api/photos", params)
-
-        assert json_response(response, 422)["error"] == "Radar capture is paused"
-      end
-    end
-
-    test "rejects missing and unsupported upload device identities", %{conn: conn, upload: upload} do
-      for device_type <- [nil, "fake"] do
-        params = %{"photo" => upload, "infraction" => @valid_infraction_data}
-        params = if device_type, do: Map.put(params, "device_type", device_type), else: params
-
-        response =
-          conn |> put_req_header("x-api-key", @valid_api_key) |> post("/api/photos", params)
-
-        assert json_response(response, 422)["error"] == "A supported device_type is required"
-      end
-
-      assert Repo.all(Radar.Photo) == []
+      assert %{"id" => photo_id, "infraction_id" => infraction_id} = json_response(conn, 201)
+      assert Repo.get!(Radar.Photo, photo_id)
+      assert Infractions.get_infraction!(infraction_id).photo_id == photo_id
     end
 
     test "returns an infraction error without deleting the uploaded photo", %{
@@ -223,7 +183,6 @@ defmodule RadarWeb.Api.PhotoControllerTest do
         conn
         |> put_req_header("x-api-key", @valid_api_key)
         |> post("/api/photos", %{
-          "device_type" => @device_type,
           "photo" => upload,
           "infraction" => @invalid_infraction_data
         })
@@ -254,7 +213,6 @@ defmodule RadarWeb.Api.PhotoControllerTest do
         conn
         |> put_req_header("x-api-key", @valid_api_key)
         |> post("/api/photos", %{
-          "device_type" => @device_type,
           "photo" => upload,
           "infraction" => "{not-json"
         })
@@ -292,7 +250,6 @@ defmodule RadarWeb.Api.PhotoControllerTest do
         conn
         |> put_req_header("x-api-key", @valid_api_key)
         |> post("/api/photos", %{
-          "device_type" => @device_type,
           "photo" => bad_upload,
           "infraction" => @valid_infraction_data
         })

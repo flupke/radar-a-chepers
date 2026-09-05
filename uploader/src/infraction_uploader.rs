@@ -4,7 +4,6 @@ use reqwest::{Client, multipart};
 use tokio::sync::mpsc;
 
 use crate::actor::{Actor, ActorPort};
-use crate::config_channel::RadarDeviceType;
 use crate::infraction_recorder::{Infraction, ensure_jpeg};
 
 const CAMERA_DOWNLOADS_DIR: &str = "camera-downloads";
@@ -14,13 +13,8 @@ pub struct InfractionUploader {
 }
 
 impl InfractionUploader {
-    pub fn new(
-        infractions_dir: Utf8PathBuf,
-        api_url: String,
-        api_key: String,
-        radar_device: RadarDeviceType,
-    ) -> Self {
-        Self::new_with_photo_retrieval(infractions_dir, api_url, api_key, true, radar_device)
+    pub fn new(infractions_dir: Utf8PathBuf, api_url: String, api_key: String) -> Self {
+        Self::new_with_photo_retrieval(infractions_dir, api_url, api_key, true)
     }
 
     pub fn new_with_photo_retrieval(
@@ -28,7 +22,6 @@ impl InfractionUploader {
         api_url: String,
         api_key: String,
         retrieve_camera_photos: bool,
-        radar_device: RadarDeviceType,
     ) -> Self {
         Self {
             port: InfractionUploaderInner::new(
@@ -36,7 +29,6 @@ impl InfractionUploader {
                 api_url,
                 api_key,
                 retrieve_camera_photos,
-                radar_device,
             )
             .start(),
         }
@@ -54,7 +46,6 @@ struct InfractionUploaderInner {
     api_key: String,
     client: Client,
     retrieve_camera_photos: bool,
-    radar_device: RadarDeviceType,
 }
 
 impl InfractionUploaderInner {
@@ -63,7 +54,6 @@ impl InfractionUploaderInner {
         api_url: String,
         api_key: String,
         retrieve_camera_photos: bool,
-        radar_device: RadarDeviceType,
     ) -> Self {
         Self {
             infractions_dir,
@@ -71,7 +61,6 @@ impl InfractionUploaderInner {
             api_key,
             client: Client::new(),
             retrieve_camera_photos,
-            radar_device,
         }
     }
 
@@ -137,8 +126,7 @@ impl InfractionUploaderInner {
                     .file_name(filename)
                     .mime_str("image/jpeg")?,
             )
-            .text("infraction", json_data)
-            .text("device_type", self.radar_device.as_wire_value());
+            .text("infraction", json_data);
 
         let resp = self
             .client
@@ -166,11 +154,7 @@ impl InfractionUploaderInner {
 impl Actor for InfractionUploaderInner {
     type Command = InfractionUploaderCommand;
 
-    async fn event_loop(
-        self,
-        _port: ActorPort<Self::Command>,
-        mut command_receiver: mpsc::UnboundedReceiver<Self::Command>,
-    ) {
+    async fn event_loop(self, mut command_receiver: mpsc::UnboundedReceiver<Self::Command>) {
         while let Some(command) = command_receiver.recv().await {
             match command {
                 InfractionUploaderCommand::NotifyInfraction => {
@@ -271,76 +255,73 @@ mod tests {
     const TEST_JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0x00];
 
     #[tokio::test]
-    async fn photo_upload_declares_the_selected_device() {
+    async fn uploads_pending_photo_and_metadata() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        for device in [RadarDeviceType::Rd03d, RadarDeviceType::Ld2451] {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let address = listener.local_addr().unwrap();
-            let server = tokio::spawn(async move {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut request = Vec::new();
-                let mut buffer = [0; 4096];
-                loop {
-                    let count = socket.read(&mut buffer).await.unwrap();
-                    assert!(count > 0);
-                    request.extend_from_slice(&buffer[..count]);
-                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                        let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
-                        let length: usize = headers
-                            .lines()
-                            .find_map(|line| line.strip_prefix("content-length: "))
-                            .unwrap()
-                            .parse()
-                            .unwrap();
-                        if request.len() >= end + 4 + length {
-                            break;
-                        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 4096];
+            loop {
+                let count = socket.read(&mut buffer).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length: "))
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    if request.len() >= end + 4 + length {
+                        break;
                     }
                 }
-                socket
-                    .write_all(
-                        b"HTTP/1.1 201 Created\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-                    )
-                    .await
-                    .unwrap();
-                request
-            });
-            let temp_dir = tempfile::tempdir().unwrap();
-            let dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
-            let infraction = Infraction {
-                recorded_speed: 42,
-                authorized_speed: 30,
-                location: "Lorgues".to_string(),
-                datetime_taken: Utc::now(),
-            };
-            infraction.save_infraction_json(&dir).unwrap();
-            let photo_path = infraction.photo_path(&dir);
-            std::fs::write(&photo_path, TEST_JPEG).unwrap();
-            let json_path = photo_path.with_extension("json");
-            let uploader = InfractionUploaderInner::new(
-                dir,
-                format!("http://{address}"),
-                "test-key".to_string(),
-                false,
-                device,
-            );
-            tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                uploader.upload_one(json_path.as_std_path()),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-            let request = server.await.unwrap();
-            let request = String::from_utf8_lossy(&request);
-            assert!(request.contains(&format!(
-                "name=\"device_type\"\r\n\r\n{}",
-                device.as_wire_value()
-            )));
-            assert!(!json_path.exists());
-            assert!(photo_path.exists());
-        }
+            }
+            socket
+                .write_all(
+                    b"HTTP/1.1 201 Created\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                )
+                .await
+                .unwrap();
+            request
+        });
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
+        let infraction = Infraction {
+            recorded_speed: 42,
+            authorized_speed: 30,
+            location: "Lorgues".to_string(),
+            datetime_taken: Utc::now(),
+        };
+        infraction.save_infraction_json(&dir).unwrap();
+        let photo_path = infraction.photo_path(&dir);
+        std::fs::write(&photo_path, TEST_JPEG).unwrap();
+        let json_path = photo_path.with_extension("json");
+        let uploader = InfractionUploaderInner::new(
+            dir,
+            format!("http://{address}"),
+            "test-key".to_string(),
+            false,
+        );
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            uploader.upload_one(json_path.as_std_path()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let request = server.await.unwrap();
+        let request = String::from_utf8_lossy(&request);
+        assert!(request.contains("x-api-key: test-key"));
+        assert!(request.contains("name=\"photo\""));
+        assert!(request.contains("name=\"infraction\""));
+        assert!(request.contains("\"recorded_speed\":42"));
+        assert!(!json_path.exists());
+        assert!(photo_path.exists());
     }
 
     #[test]

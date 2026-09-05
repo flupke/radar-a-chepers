@@ -12,7 +12,6 @@ const TRIGGER_PREFIX: &str = "TRIGGER: ";
 const TRIGGER_PULSE_MS: u64 = 150;
 const CAPTURE_CHECK_LOG_INTERVAL: Duration = Duration::from_secs(1);
 
-use bt_hci::controller::ExternalController;
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
@@ -20,12 +19,11 @@ use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
     gpio::{Level, Output, OutputConfig},
-    timer::{systimer::SystemTimer, timg::TimerGroup},
+    timer::systimer::SystemTimer,
     uart::{Config, DataBits, Parity, StopBits, Uart, UartRx, UartTx},
     Async,
 };
 use esp_println as _;
-use esp_wifi::ble::controller::BleConnector;
 use radar_a_chepers::{
     radar_module::{
         RadarFrameState, RadarModule, RadarTarget, RadarTargetFrame, MAX_ACK_FRAME_HEADER_LENGTH,
@@ -742,10 +740,6 @@ async fn main(spawner: Spawner) {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    esp_alloc::heap_allocator!(size: 64 * 1024);
-    // COEX needs more RAM - so we've added some more
-    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 64 * 1024);
-
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
     esp_hal_embassy::init(timer0.alarm0);
 
@@ -753,16 +747,6 @@ async fn main(spawner: Spawner) {
 
     let trigger_config = TRIGGER_CONFIG.init(Mutex::new(TriggerConfig::default()));
     let trigger_output = Output::new(peripherals.GPIO42, Level::Low, OutputConfig::default());
-
-    let rng = esp_hal::rng::Rng::new(peripherals.RNG);
-    let timer1 = TimerGroup::new(peripherals.TIMG0);
-    let wifi_init = esp_wifi::init(timer1.timer0, rng, peripherals.RADIO_CLK)
-        .expect("Failed to initialize WIFI/BLE controller");
-    let (mut _wifi_controller, _interfaces) = esp_wifi::wifi::new(&wifi_init, peripherals.WIFI)
-        .expect("Failed to initialize WIFI controller");
-    // find more examples https://github.com/embassy-rs/trouble/tree/main/examples/esp32
-    let transport = BleConnector::new(&wifi_init, peripherals.BT);
-    let _ble_controller = ExternalController::<_, 20>::new(transport);
 
     let radar = selected_radar_module();
     let radar_uart_config = Config::default()
