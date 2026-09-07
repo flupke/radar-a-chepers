@@ -27,6 +27,16 @@ See [LD2451](#ld2451) for wiring, protocol assumptions and verification.
 
 The install script always rebuilds the ESP firmware, flashes it before updating the uploader service, and restarts `radar-uploader.service`.
 
+Deployment backs up the installed firmware ELF, uploader, environment, service
+unit, and flasher before stopping capture. It flashes the staged ELF before
+replacing the installed decoder. If flashing or service startup fails, it
+attempts to reflash and restore the previous installation. Failed deployments
+retain `install.log` and the `previous/` backup directory under the printed Pi
+staging path (`/tmp/radar-a-chepers-install.XXXXXXXX`). If rollback cannot restore
+a matching firmware and runtime, the uploader stays stopped and disabled; use
+those backups to recover before restarting it. Staging is temporary storage, so
+copy the retained backup somewhere durable before rebooting an unrecovered Pi.
+
 Deploy the web app to Fly:
 
 ```sh

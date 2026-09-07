@@ -276,11 +276,10 @@ EOF
 }
 
 install_remote() {
-  local remote_tmp="/tmp/radar-a-chepers-install-$$"
+  local remote_tmp
   local env_file="${LOCAL_TMP_DIR}/uploader.env"
   local service_file="${LOCAL_TMP_DIR}/${REMOTE_SERVICE_NAME}"
-  local remote_env_dir="${REMOTE_ENV_FILE%/*}"
-  local remote_espflash_dir="${REMOTE_ESPFLASH_BINARY%/*}"
+  local install_command remote_command
 
   require_command "$SSH_BIN"
   require_command "$SCP_BIN"
@@ -289,7 +288,7 @@ install_remote() {
   write_service_file "$service_file"
 
   echo "==> Creating remote staging directory..."
-  "$SSH_BIN" "$REMOTE" "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp'"
+  remote_tmp="$("$SSH_BIN" "$REMOTE" 'mktemp -d /tmp/radar-a-chepers-install.XXXXXXXX')"
 
   echo "==> Copying uploader, radar ELF, espflash, environment, and service files..."
   "$SCP_BIN" \
@@ -298,27 +297,20 @@ install_remote() {
     "$ESPFLASH_BINARY" \
     "$env_file" \
     "$service_file" \
+    "$ROOT_DIR/scripts/install-remote.sh" \
     "$REMOTE:$remote_tmp/"
 
   echo "==> Installing runtime files and flashing radar firmware on ${REMOTE}..."
-  "$SSH_BIN" "$REMOTE" "
-    set -e
-    sudo systemctl stop '$REMOTE_SERVICE_NAME' 2>/dev/null || true
-    sudo install -d -m 0755 '$REMOTE_APP_DIR'
-    sudo install -d -m 0755 '$remote_env_dir'
-    sudo install -d -m 0755 '$REMOTE_INFRACTIONS_DIR'
-    sudo install -d -m 0755 '$remote_espflash_dir'
-    sudo install -m 0755 '$remote_tmp/$(basename "$ESPFLASH_BINARY")' '$REMOTE_ESPFLASH_BINARY'
-    sudo install -m 0644 '$remote_tmp/$(basename "$RADAR_BINARY")' '$REMOTE_RADAR_BINARY'
-    sudo '$REMOTE_ESPFLASH_BINARY' flash --chip esp32s3 --port '$SERIAL_PORT' --non-interactive '$REMOTE_RADAR_BINARY'
-    sudo install -m 0755 '$remote_tmp/uploader' '$REMOTE_APP_DIR/uploader'
-    sudo install -m 0600 '$remote_tmp/uploader.env' '$REMOTE_ENV_FILE'
-    sudo install -m 0644 '$remote_tmp/$REMOTE_SERVICE_NAME' '/etc/systemd/system/$REMOTE_SERVICE_NAME'
-    sudo systemctl daemon-reload
-    sudo systemctl enable '$REMOTE_SERVICE_NAME'
-    sudo systemctl restart '$REMOTE_SERVICE_NAME'
-    rm -rf '$remote_tmp'
-  "
+  install_command="$(printf '%q ' sudo /bin/bash "$remote_tmp/install-remote.sh" \
+    "$remote_tmp" "$REMOTE_APP_DIR" "$REMOTE_ENV_FILE" "$REMOTE_INFRACTIONS_DIR" \
+    "$REMOTE_RADAR_BINARY" "$REMOTE_ESPFLASH_BINARY" "$REMOTE_SERVICE_NAME" \
+    "/etc/systemd/system/$REMOTE_SERVICE_NAME" "$SERIAL_PORT")"
+  # Keep output on the Pi so losing SSH cannot interrupt flashing or rollback
+  # through a broken stdout/stderr pipe. Failed deployments retain their backup.
+  remote_command="$(printf \
+    'deploy_status=0; %s >%q 2>&1 || deploy_status=$?; cat %q; if [ "$deploy_status" -eq 0 ]; then sudo rm -rf -- %q; fi; exit "$deploy_status"' \
+    "$install_command" "$remote_tmp/install.log" "$remote_tmp/install.log" "$remote_tmp")"
+  "$SSH_BIN" "$REMOTE" "$remote_command"
 
   echo "==> Installed ${REMOTE_SERVICE_NAME} on ${REMOTE}"
 }
