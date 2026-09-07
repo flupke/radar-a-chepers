@@ -9,6 +9,8 @@ defmodule Radar.Photo do
     field :tigris_key, :string
     field :content_type, :string
     field :file_size, :integer
+    field :capture_id, :string
+    field :capture_fingerprint, :string
 
     has_many :infractions, Radar.Infraction
 
@@ -20,10 +22,18 @@ defmodule Radar.Photo do
   """
   def upload_changeset(photo, attrs) do
     photo
-    |> cast(attrs, [:filename, :tigris_key, :content_type, :file_size])
+    |> cast(attrs, [
+      :filename,
+      :tigris_key,
+      :content_type,
+      :file_size,
+      :capture_id,
+      :capture_fingerprint
+    ])
     |> validate_required([:filename, :tigris_key, :content_type])
     |> validate_length(:filename, max: 255)
     |> validate_number(:file_size, greater_than: 0)
+    |> unique_constraint(:capture_id)
   end
 
   @doc """

@@ -11,6 +11,7 @@ defmodule Radar.Infraction do
     field :recorded_speed, :integer
     field :authorized_speed, :integer
     field :location, :string
+    field :capture_id, :string
 
     belongs_to :photo, Radar.Photo
 
@@ -22,7 +23,14 @@ defmodule Radar.Infraction do
   """
   def speed_ticket_changeset(infraction, attrs) do
     infraction
-    |> cast(attrs, [:datetime_taken, :recorded_speed, :authorized_speed, :location, :photo_id])
+    |> cast(attrs, [
+      :datetime_taken,
+      :recorded_speed,
+      :authorized_speed,
+      :location,
+      :photo_id,
+      :capture_id
+    ])
     |> put_change(:type, "speed_ticket")
     |> validate_required([
       :datetime_taken,
@@ -35,5 +43,6 @@ defmodule Radar.Infraction do
     |> validate_number(:authorized_speed, greater_than: 0)
     |> validate_length(:location, max: 255)
     |> foreign_key_constraint(:photo_id)
+    |> unique_constraint(:capture_id)
   end
 end

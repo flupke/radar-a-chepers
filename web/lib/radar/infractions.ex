@@ -62,8 +62,15 @@ defmodule Radar.Infractions do
         Phoenix.PubSub.broadcast(Radar.PubSub, "infractions", {:new_infraction, infraction})
         {:ok, infraction}
 
-      error ->
-        error
+      {:error, changeset} = error ->
+        if Enum.any?(Keyword.get_values(changeset.errors, :capture_id), fn {_, opts} ->
+             opts[:constraint] == :unique
+           end) do
+          {:ok,
+           Repo.get_by!(Infraction, capture_id: Ecto.Changeset.get_field(changeset, :capture_id))}
+        else
+          error
+        end
     end
   end
 

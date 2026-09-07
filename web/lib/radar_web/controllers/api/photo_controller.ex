@@ -38,7 +38,9 @@ defmodule RadarWeb.Api.PhotoController do
        ) do
     with {:ok, decoded_infraction} <- decode_infraction_data(infraction_data),
          {:ok, file_data} <- read_upload_file(photo_upload),
-         {:ok, photo} <- create_photo_with_infraction(photo_upload, file_data, decoded_infraction) do
+         {:ok, capture_id} <- capture_id(conn),
+         {:ok, photo} <-
+           create_photo_with_infraction(photo_upload, file_data, decoded_infraction, capture_id) do
       conn
       |> put_status(:created)
       |> json(%{
@@ -54,6 +56,11 @@ defmodule RadarWeb.Api.PhotoController do
           end
       })
     else
+      {:error, :capture_id_conflict} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: "Capture ID already belongs to different photo or infraction data"})
+
       {:error, reason} ->
         conn
         |> put_status(:unprocessable_entity)
@@ -65,6 +72,14 @@ defmodule RadarWeb.Api.PhotoController do
     conn
     |> put_status(:bad_request)
     |> json(%{error: "Missing photo or infraction data"})
+  end
+
+  defp capture_id(conn) do
+    case get_req_header(conn, "x-capture-id") do
+      [] -> {:ok, nil}
+      [id] when byte_size(id) in 1..200 -> {:ok, "client:" <> id}
+      _ -> {:error, "Invalid capture ID"}
+    end
   end
 
   defp read_upload_file(%Plug.Upload{path: path}) do
@@ -85,21 +100,45 @@ defmodule RadarWeb.Api.PhotoController do
   defp decode_infraction_data(data) when is_map(data), do: {:ok, data}
   defp decode_infraction_data(_data), do: {:error, "Invalid infraction data"}
 
-  defp create_photo_with_infraction(upload, file_data, decoded_infraction) do
+  defp create_photo_with_infraction(upload, file_data, decoded_infraction, capture_id) do
+    infraction_attrs = %{
+      "datetime_taken" => decoded_infraction["datetime_taken"],
+      "recorded_speed" => parse_integer(decoded_infraction["recorded_speed"]),
+      "authorized_speed" => parse_integer(decoded_infraction["authorized_speed"]),
+      "location" => decoded_infraction["location"]
+    }
+
+    fingerprint =
+      :crypto.hash(:sha256, [
+        file_data,
+        Jason.encode!([
+          upload.filename,
+          upload.content_type,
+          Enum.map(
+            ~w(datetime_taken recorded_speed authorized_speed location),
+            &infraction_attrs[&1]
+          )
+        ])
+      ])
+      |> Base.encode16(case: :lower)
+
+    # Content identity also makes retries from older uploaders idempotent.
+    capture_id = capture_id || "content:" <> fingerprint
+
     photo_attrs = %{
       "filename" => upload.filename,
       "content_type" => upload.content_type,
-      "file_size" => byte_size(file_data)
+      "file_size" => byte_size(file_data),
+      "capture_id" => capture_id,
+      "capture_fingerprint" => fingerprint
     }
 
     case Photos.create_photo(photo_attrs, file_data) do
       {:ok, photo} ->
         infraction_attrs =
-          Map.merge(decoded_infraction, %{
+          Map.merge(infraction_attrs, %{
             "photo_id" => photo.id,
-            "recorded_speed" => parse_integer(decoded_infraction["recorded_speed"]),
-            "authorized_speed" => parse_integer(decoded_infraction["authorized_speed"]),
-            "location" => decoded_infraction["location"]
+            "capture_id" => capture_id
           })
 
         log_json_backup_result(

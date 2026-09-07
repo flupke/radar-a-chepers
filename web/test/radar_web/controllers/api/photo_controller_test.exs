@@ -45,6 +45,74 @@ defmodule RadarWeb.Api.PhotoControllerTest do
   end
 
   describe "POST /api/photos" do
+    test "retries reuse one photo and infraction, including older clients", %{upload: upload} do
+      for capture_id <- [nil, "camera-capture-123"] do
+        send_upload = fn -> upload_capture(upload, @valid_infraction_data, capture_id) end
+        first = send_upload.() |> json_response(201)
+        second = send_upload.() |> json_response(201)
+
+        assert second["id"] == first["id"]
+        assert second["infraction_id"] == first["infraction_id"]
+        assert second["tigris_key"] == first["tigris_key"]
+      end
+
+      assert Repo.aggregate(Radar.Photo, :count) == 2
+      assert Repo.aggregate(Radar.Infraction, :count) == 2
+    end
+
+    test "rejects reuse of a capture ID for changed data", %{upload: upload} do
+      original =
+        upload_capture(upload, @valid_infraction_data, "capture-conflict") |> json_response(201)
+
+      changed = Map.put(@valid_infraction_data, "recorded_speed", "99")
+
+      assert upload_capture(upload, changed, "capture-conflict") |> json_response(409)
+      assert Repo.aggregate(Radar.Photo, :count) == 1
+      assert Infractions.get_infraction!(original["infraction_id"]).recorded_speed == 78
+
+      File.write!(upload.path, "different photo")
+
+      assert upload_capture(upload, @valid_infraction_data, "capture-conflict")
+             |> json_response(409)
+
+      assert Repo.aggregate(Radar.Infraction, :count) == 1
+    end
+
+    test "retry finishes a capture whose photo was saved before an interrupted request", %{
+      upload: upload
+    } do
+      first =
+        upload_capture(upload, @valid_infraction_data, "interrupted-capture")
+        |> json_response(201)
+
+      Repo.get!(Radar.Infraction, first["infraction_id"]) |> Repo.delete!()
+
+      retried =
+        upload_capture(upload, @valid_infraction_data, "interrupted-capture")
+        |> json_response(201)
+
+      assert retried["id"] == first["id"]
+      assert Repo.aggregate(Radar.Photo, :count) == 1
+      assert Repo.aggregate(Radar.Infraction, :count) == 1
+    end
+
+    test "concurrent retries create only one capture", %{upload: upload} do
+      # Initialize the mock's shared storage before concurrent requests.
+      Radar.MockS3Client.put_object("concurrency-setup", "", [])
+
+      responses =
+        1..4
+        |> Task.async_stream(fn _ ->
+          upload_capture(upload, @valid_infraction_data, "concurrent-capture")
+          |> json_response(201)
+        end)
+        |> Enum.map(fn {:ok, response} -> response end)
+
+      assert responses |> Enum.map(& &1["infraction_id"]) |> Enum.uniq() |> length() == 1
+      assert Repo.aggregate(Radar.Photo, :count) == 1
+      assert Repo.aggregate(Radar.Infraction, :count) == 1
+    end
+
     test "rejects requests without an API key", %{conn: conn} do
       conn = post(conn, "/api/photos", %{})
       assert json_response(conn, 401)["error"] == "API key required"
@@ -258,5 +326,11 @@ defmodule RadarWeb.Api.PhotoControllerTest do
       assert %{"error" => error_message} = response
       assert String.contains?(error_message, "Failed to read upload")
     end
+  end
+
+  defp upload_capture(upload, data, capture_id) do
+    conn = build_conn() |> put_req_header("x-api-key", @valid_api_key)
+    conn = if capture_id, do: put_req_header(conn, "x-capture-id", capture_id), else: conn
+    post(conn, "/api/photos", %{"photo" => upload, "infraction" => data})
   end
 end

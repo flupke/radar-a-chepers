@@ -18,25 +18,55 @@ defmodule Radar.Photos do
   end
 
   defp do_create_photo(attrs, file_data) do
+    case attrs["capture_id"] && Repo.get_by(Photo, capture_id: attrs["capture_id"]) do
+      %Photo{} = photo -> verify_capture(photo, attrs)
+      _ -> persist_photo(attrs, file_data)
+    end
+  end
+
+  defp persist_photo(attrs, file_data) do
     filename = attrs["filename"]
     content_type = attrs["content_type"] || "image/jpeg"
-    tigris_key = Photo.generate_tigris_key(filename)
+
+    tigris_key =
+      if fingerprint = attrs["capture_fingerprint"] do
+        "radar/photos/captures/#{fingerprint}#{Path.extname(filename)}"
+      else
+        Photo.generate_tigris_key(filename)
+      end
 
     with {:ok, _} <- upload_to_tigris(tigris_key, file_data, content_type),
          photo_attrs = %{
            "filename" => filename,
            "tigris_key" => tigris_key,
            "content_type" => content_type,
-           "file_size" => attrs["file_size"] || byte_size(file_data)
+           "file_size" => attrs["file_size"] || byte_size(file_data),
+           "capture_id" => attrs["capture_id"],
+           "capture_fingerprint" => attrs["capture_fingerprint"]
          },
-         {:ok, photo} <- %Photo{} |> Photo.upload_changeset(photo_attrs) |> Repo.insert() do
-      {:ok, photo}
+         {:ok, photo} <-
+           %Photo{}
+           |> Photo.upload_changeset(photo_attrs)
+           |> Repo.insert(on_conflict: :nothing, conflict_target: :capture_id) do
+      if capture_id = attrs["capture_id"] do
+        verify_capture(Repo.get_by!(Photo, capture_id: capture_id), attrs)
+      else
+        {:ok, photo}
+      end
     else
       {:error, %Ecto.Changeset{} = changeset} ->
         {:error, changeset}
 
       {:error, reason} ->
         {:error, "Failed to upload to Tigris: #{inspect(reason)}"}
+    end
+  end
+
+  defp verify_capture(photo, attrs) do
+    if photo.capture_fingerprint == attrs["capture_fingerprint"] do
+      {:ok, photo}
+    else
+      {:error, :capture_id_conflict}
     end
   end
 
