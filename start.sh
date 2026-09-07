@@ -31,6 +31,7 @@ START_WEB_ONLY="${START_WEB_ONLY:-0}"
 CHILD_PIDS=()
 SHUTTING_DOWN=0
 REMOTE_UPLOADER_STARTED=0
+REMOTE_DEV_SERVICE_NAME=""
 
 usage() {
   cat <<EOF
@@ -100,9 +101,17 @@ cleanup() {
   fi
 
   if [ "$REMOTE_UPLOADER_STARTED" = 1 ]; then
-    echo "==> Restarting ${REMOTE_SERVICE_NAME} on ${REMOTE_UPLOADER_HOST}..."
-    "$SSH_BIN" "$REMOTE_UPLOADER_HOST" \
-      "sudo systemctl restart $(shell_quote "$REMOTE_SERVICE_NAME")" 2>/dev/null || true
+    local remote_cleanup
+    remote_cleanup=$(printf \
+      'set -eu; state=$(sudo systemctl show --property=LoadState --value %q); if [ "$state" != not-found ]; then sudo systemctl stop %q; fi; sudo systemctl start %q' \
+      "$REMOTE_DEV_SERVICE_NAME" "$REMOTE_DEV_SERVICE_NAME" "$REMOTE_SERVICE_NAME")
+    echo "==> Stopping the development uploader and restoring ${REMOTE_SERVICE_NAME} on ${REMOTE_UPLOADER_HOST}..."
+    if ! "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=10 \
+      -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+      "$REMOTE_UPLOADER_HOST" "$remote_cleanup"; then
+      echo "error: Could not confirm remote cleanup; the development service expires after 20s without heartbeats." >&2
+      [ "$status" != 0 ] || status=1
+    fi
   fi
 
   exit "$status"
@@ -281,28 +290,49 @@ start_remote_uploader() {
   local api_endpoint="$1"
   local api_key="$2"
   local command
+  local arg
+  local session_pid="$BASHPID"
+  local -a service_args uploader_args
 
   require_command "$SSH_BIN"
 
-  command=$(
-    printf 'set -eu; '
-    printf 'sudo systemctl stop %s 2>/dev/null || true; ' "$(shell_quote "$REMOTE_SERVICE_NAME")"
-    printf 'exec sudo env RUST_LOG=%s %s ' \
-      "$(shell_quote "${RUST_LOG:-info}")" \
-      "$(shell_quote "${REMOTE_APP_DIR}/uploader")"
-    printf '%s %s ' "--api-endpoint" "$(shell_quote "$api_endpoint")"
-    printf '%s %s ' "--api-key" "$(shell_quote "$api_key")"
-    printf '%s %s ' "--infractions-dir" "$(shell_quote "$REMOTE_INFRACTIONS_DIR")"
-    printf '%s %s ' "--radar-device" "$(shell_quote "$RADAR_DEVICE")"
-    printf '%s %s ' "--serial-port" "$(shell_quote "$SERIAL_PORT")"
-    printf '%s %s ' "--config-serial-port" "$(shell_quote "$CONFIG_SERIAL_PORT")"
-    printf '%s %s' "--elf-path" "$(shell_quote "$REMOTE_RADAR_BINARY")"
+  if [[ ! "$REMOTE_SERVICE_NAME" =~ ^[a-zA-Z0-9_.@:-]+\.service$ ]]; then
+    echo "error: Invalid remote systemd service name: ${REMOTE_SERVICE_NAME}" >&2
+    exit 1
+  fi
+
+  REMOTE_DEV_SERVICE_NAME="radar-dev-uploader-$$-${RANDOM}.service"
+  service_args=(
+    sudo systemd-run --unit "$REMOTE_DEV_SERVICE_NAME" --collect --wait --pipe
+    --service-type=exec --property=KillMode=control-group --property=TimeoutStopSec=15s
+    "--property=ExecStopPost=/usr/bin/systemctl start ${REMOTE_SERVICE_NAME}"
+    "--setenv=RUST_LOG=${RUST_LOG:-info}"
   )
+  uploader_args=(
+    /bin/bash -c "$(cat "$ROOT_DIR/scripts/remote-uploader.sh")" -- "$REMOTE_SERVICE_NAME"
+    "${REMOTE_APP_DIR}/uploader"
+    --api-endpoint "$api_endpoint" --api-key "$api_key"
+    --infractions-dir "$REMOTE_INFRACTIONS_DIR" --radar-device "$RADAR_DEVICE"
+    --serial-port "$SERIAL_PORT" --config-serial-port "$CONFIG_SERIAL_PORT"
+    --elf-path "$REMOTE_RADAR_BINARY"
+  )
+  # Older Pi systemd versions expand dollars in ExecStart arguments. Escape
+  # them here so both the shell program and supplied arguments arrive intact.
+  for arg in "${uploader_args[@]}"; do
+    service_args+=("${arg//\$/\$\$}")
+  done
+  command="$(printf '%q ' "${service_args[@]}")"
 
   echo "==> Starting uploader on ${REMOTE_UPLOADER_HOST} against ${api_endpoint}..."
-  "$SSH_BIN" "$REMOTE_UPLOADER_HOST" "$command" &
-  CHILD_PIDS+=("$!")
   REMOTE_UPLOADER_STARTED=1
+  "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=10 \
+    -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+    "$REMOTE_UPLOADER_HOST" "$command" < <(
+      # Even SIGKILL of start.sh must end the lease: its SSH and heartbeat
+      # children can otherwise outlive it and keep the hardware indefinitely.
+      while kill -0 "$session_pid" 2>/dev/null && printf 'alive\n' 2>/dev/null; do sleep 5; done
+    ) &
+  CHILD_PIDS+=("$!")
 }
 
 while [ "$#" -gt 0 ]; do

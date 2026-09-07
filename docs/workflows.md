@@ -65,7 +65,10 @@ Use this when debugging the real radar through the local admin page:
 ./start.sh --radar-device rd03d --local-web --remote-uploader rshep.local
 ```
 
-This starts Phoenix locally, detects this machine's LAN IPv4 address, stops the Pi's normal `radar-uploader.service`, and runs the installed Pi uploader over SSH against the local web server.
+This starts Phoenix locally, detects this machine's LAN IPv4 address, and runs
+the installed Pi uploader against the local web server in a temporary
+`radar-dev-uploader-*.service` unit. That unit stops the normal
+`radar-uploader.service` while it owns the hardware.
 Deploy that device with `./install.sh --radar-device <device>` first; remote
 `start.sh` uses the firmware already installed on the Pi.
 
@@ -75,10 +78,17 @@ If LAN IP detection is wrong, override it:
 LOCAL_API_ENDPOINT_LAN=http://192.168.1.65:4000 ./start.sh --radar-device rd03d --local-web --remote-uploader rshep.local
 ```
 
-When the local `start.sh` process exits, it should restart the normal Pi service. If cleanup is interrupted, restore it manually:
+When `start.sh` exits, cleanup stops the temporary unit and all its uploader
+processes before starting the normal Pi service. SSH disconnection or heartbeat
+loss also ends the temporary unit: the heartbeat timeout is 20 seconds, with up
+to 15 more seconds to force-stop an unresponsive uploader. Killing `start.sh`
+without cleanup stops heartbeats within five seconds.
+
+If recovery cannot be confirmed, stop any temporary units before restoring the
+normal service manually:
 
 ```sh
-ssh rshep.local 'sudo systemctl restart radar-uploader.service'
+ssh rshep.local 'sudo systemctl stop "radar-dev-uploader-*.service"; sudo systemctl restart radar-uploader.service'
 ```
 
 ## Checking The Pi
