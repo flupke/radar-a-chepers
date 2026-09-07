@@ -50,20 +50,35 @@ impl Actor for RadarReader {
         mut command_receiver: tokio::sync::mpsc::UnboundedReceiver<Self::Command>,
     ) {
         let (host_command_tx, host_command_rx) = mpsc::channel();
-        let join_result = tokio::task::spawn_blocking(move || self.read_loop(host_command_rx));
+        let worker = tokio::task::spawn_blocking(move || self.read_loop(host_command_rx));
+        supervise_reader(&mut command_receiver, host_command_tx, worker).await;
+    }
+}
 
-        while let Some(command) = command_receiver.recv().await {
-            match command {
-                RadarReaderCommand::UpdateConfig(config) => {
-                    let _ = host_command_tx.send(config_command(&config));
+async fn supervise_reader(
+    commands: &mut tokio::sync::mpsc::UnboundedReceiver<RadarReaderCommand>,
+    host_commands: mpsc::Sender<String>,
+    mut worker: tokio::task::JoinHandle<()>,
+) {
+    let result = loop {
+        tokio::select! {
+            result = &mut worker => break result,
+            command = commands.recv() => {
+                let Some(RadarReaderCommand::UpdateConfig(config)) = command else {
+                    // Blocking tasks cannot be aborted. Closing their input asks
+                    // the serial loop to stop after its bounded read timeout.
+                    drop(host_commands);
+                    break worker.await;
+                };
+                if host_commands.send(config_command(&config)).is_err() {
+                    break worker.await;
                 }
             }
         }
-
-        let join_result = join_result.await;
-        if let Err(error) = join_result {
-            log::error!("Radar reader thread failed: {error}");
-        }
+    };
+    match result {
+        Ok(()) => log::error!("Radar reader stopped"),
+        Err(error) => log::error!("Radar reader thread failed: {error}"),
     }
 }
 
@@ -124,9 +139,15 @@ impl RadarReader {
         );
 
         loop {
-            while let Ok(command) = host_command_rx.try_recv() {
-                latest_host_command = Some(command);
-                last_host_command_sent_at = None;
+            loop {
+                match host_command_rx.try_recv() {
+                    Ok(command) => {
+                        latest_host_command = Some(command);
+                        last_host_command_sent_at = None;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => return,
+                }
             }
 
             match config_port.read(&mut config_buffer) {
@@ -274,6 +295,39 @@ fn config_command(config: &RadarConfig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn supervision_detects_worker_exit_without_waiting_for_commands() {
+        for panic in [false, true] {
+            let (_commands_tx, mut commands_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (host_tx, _host_rx) = mpsc::channel();
+            let worker = tokio::task::spawn_blocking(move || {
+                assert!(!panic, "simulated serial worker panic");
+            });
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                supervise_reader(&mut commands_rx, host_tx, worker),
+            )
+            .await
+            .expect("a stopped reader must wake the process even with a live config channel");
+        }
+    }
+
+    #[tokio::test]
+    async fn closing_commands_stops_the_blocking_worker() {
+        let (commands_tx, mut commands_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (host_tx, host_rx) = mpsc::channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            assert!(host_rx.recv().is_err());
+        });
+        drop(commands_tx);
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            supervise_reader(&mut commands_rx, host_tx, worker),
+        )
+        .await
+        .expect("the serial worker must observe command channel shutdown");
+    }
 
     #[test]
     fn formats_config_command_for_esp_trigger() {

@@ -155,7 +155,9 @@ async fn main() -> Result<()> {
         })
         .await;
 
-    Ok(())
+    Err(eyre!(
+        "Radar reader stopped; restart the uploader to reconnect"
+    ))
 }
 
 #[cfg(test)]
