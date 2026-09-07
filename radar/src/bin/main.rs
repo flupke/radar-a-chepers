@@ -31,31 +31,9 @@ use radar_a_chepers::{
     },
     selected_radar::selected_radar_module,
     stream::{command_ack_status, TargetStream},
+    trigger_config::{parse_config_command, ConfigCommand, TriggerConfig},
 };
 use static_cell::StaticCell;
-
-#[derive(Clone, Copy)]
-struct TriggerConfig {
-    authorized_speed_kmh: i16,
-    min_dist_mm: i32,
-    max_dist_mm: i32,
-    trigger_cooldown_ms: u64,
-    aperture_angle_degrees: i16,
-    capture_paused: bool,
-}
-
-impl TriggerConfig {
-    const fn default() -> Self {
-        Self {
-            authorized_speed_kmh: 25,
-            min_dist_mm: 0,
-            max_dist_mm: 10_000,
-            trigger_cooldown_ms: 1000,
-            aperture_angle_degrees: 90,
-            capture_paused: false,
-        }
-    }
-}
 
 type SharedTriggerConfig = Mutex<NoopRawMutex, TriggerConfig>;
 static TRIGGER_CONFIG: StaticCell<SharedTriggerConfig> = StaticCell::new();
@@ -378,12 +356,14 @@ async fn handle_host_config_bytes(
         match *byte {
             b'\n' | b'\r' => {
                 if *line_len > 0 {
-                    let response =
-                        if handle_host_command(&line_buf[..*line_len], trigger_config).await {
-                            b"CONFIG_OK\n".as_slice()
-                        } else {
-                            b"CONFIG_ERR\n".as_slice()
-                        };
+                    let mut response_buf = [0; 32];
+                    let response = if let Some(command) =
+                        handle_host_command(&line_buf[..*line_len], trigger_config).await
+                    {
+                        command.acknowledgement(&mut response_buf)
+                    } else {
+                        b"CONFIG_ERR\n".as_slice()
+                    };
                     write_config_response(tx, response).await;
                     *line_len = 0;
                 }
@@ -413,6 +393,7 @@ async fn config_reader(
         "Pi config UART initialized: baud={} rx=GPIO40 tx=GPIO41",
         CONFIG_UART_BAUDRATE
     );
+    write_config_response(&mut tx, b"CONFIG_READY\n").await;
 
     loop {
         match embedded_io_async::Read::read(&mut rx, &mut read_buf).await {
@@ -450,17 +431,21 @@ async fn write_config_response(tx: &mut UartTx<'static, Async>, bytes: &[u8]) {
     }
 }
 
-async fn handle_host_command(line: &[u8], trigger_config: &'static SharedTriggerConfig) -> bool {
+async fn handle_host_command<'a>(
+    line: &'a [u8],
+    trigger_config: &'static SharedTriggerConfig,
+) -> Option<ConfigCommand<'a>> {
     let Ok(line) = core::str::from_utf8(line) else {
         defmt::warn!("Ignoring non-UTF8 host command.");
-        return false;
+        return None;
     };
 
-    let Some(config) = parse_config_command(line) else {
+    let Some(command) = parse_config_command(line) else {
         defmt::warn!("Ignoring unknown host command.");
-        return false;
+        return None;
     };
 
+    let config = command.config;
     *trigger_config.lock().await = config;
     defmt::info!(
         "Trigger config updated: authorized_speed={}km/h, min_dist={}mm, max_dist={}mm, cooldown={}ms, aperture={}deg, paused={}",
@@ -471,27 +456,7 @@ async fn handle_host_command(line: &[u8], trigger_config: &'static SharedTrigger
         config.aperture_angle_degrees,
         config.capture_paused
     );
-    true
-}
-
-fn parse_config_command(line: &str) -> Option<TriggerConfig> {
-    let mut parts = line.split_whitespace();
-    if parts.next()? != "CONFIG" {
-        return None;
-    }
-
-    Some(TriggerConfig {
-        authorized_speed_kmh: parts.next()?.parse().ok()?,
-        min_dist_mm: parts.next()?.parse().ok()?,
-        max_dist_mm: parts.next()?.parse().ok()?,
-        trigger_cooldown_ms: parts.next()?.parse().ok()?,
-        aperture_angle_degrees: parts.next()?.parse().ok()?,
-        capture_paused: match parts.next()? {
-            "0" => false,
-            "1" => true,
-            _ => return None,
-        },
-    })
+    Some(command)
 }
 
 #[embassy_executor::task]

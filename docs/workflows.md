@@ -98,6 +98,13 @@ Useful log markers:
 - `Radar target frame header observed during passive probe`: ESP sees RD03-D target frames.
 - `Capture check ...`: ESP evaluated a target against the local trigger rules.
 
+The uploader and firmware correlate config acknowledgements by revision. The
+uploader retries unacknowledged settings every second and refreshes the current
+settings every 10 seconds, including after an ESP reset. Firmware starts with
+capture paused until it receives valid settings. Deploy the firmware with the
+uploader: the new uploader requires the revision-aware firmware, while the new
+firmware also accepts the previous uploader's config commands during deployment.
+
 ## Hardware Links
 
 Pi-to-ESP config UART:

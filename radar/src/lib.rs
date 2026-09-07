@@ -14,5 +14,6 @@ pub mod radar_module;
 pub mod rd03d;
 pub mod selected_radar;
 pub mod target;
+pub mod trigger_config;
 
 pub mod stream;

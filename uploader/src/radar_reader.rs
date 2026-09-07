@@ -13,6 +13,53 @@ use crate::{
 };
 
 const HOST_COMMAND_RESEND_INTERVAL: Duration = Duration::from_secs(1);
+const HOST_COMMAND_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+
+struct HostConfig {
+    revision: u64,
+    command: String,
+    last_sent: Option<Instant>,
+    acknowledged: bool,
+}
+
+impl HostConfig {
+    fn new(config: &RadarConfig) -> Self {
+        // A fresh ID also separates acknowledgments across uploader restarts.
+        let revision = rand::random();
+        Self {
+            revision,
+            command: config_command(config, revision),
+            last_sent: None,
+            acknowledged: false,
+        }
+    }
+
+    fn should_send(&self, now: Instant) -> bool {
+        let interval = if self.acknowledged {
+            HOST_COMMAND_REFRESH_INTERVAL
+        } else {
+            HOST_COMMAND_RESEND_INTERVAL
+        };
+        self.last_sent
+            .is_none_or(|sent| now.duration_since(sent) >= interval)
+    }
+
+    fn acknowledge(&mut self, revision: u64) -> bool {
+        if self.revision != revision || self.last_sent.is_none() {
+            return false;
+        }
+        if !self.acknowledged {
+            log::info!("ESP acknowledged trigger config revision {revision}");
+        }
+        self.acknowledged = true;
+        true
+    }
+
+    fn request_refresh(&mut self) {
+        self.last_sent = None;
+        self.acknowledged = false;
+    }
+}
 
 pub enum RadarReaderCommand {
     UpdateConfig(RadarConfig),
@@ -57,7 +104,7 @@ impl Actor for RadarReader {
 
 async fn supervise_reader(
     commands: &mut tokio::sync::mpsc::UnboundedReceiver<RadarReaderCommand>,
-    host_commands: mpsc::Sender<String>,
+    host_commands: mpsc::Sender<RadarConfig>,
     mut worker: tokio::task::JoinHandle<()>,
 ) {
     let result = loop {
@@ -70,7 +117,7 @@ async fn supervise_reader(
                     drop(host_commands);
                     break worker.await;
                 };
-                if host_commands.send(config_command(&config)).is_err() {
+                if host_commands.send(config).is_err() {
                     break worker.await;
                 }
             }
@@ -83,7 +130,7 @@ async fn supervise_reader(
 }
 
 impl RadarReader {
-    fn read_loop(self, host_command_rx: mpsc::Receiver<String>) {
+    fn read_loop(self, host_command_rx: mpsc::Receiver<RadarConfig>) {
         let elf_bytes = std::fs::read(&self.elf_path).expect("Failed to read ELF file");
         let table = Table::parse(&elf_bytes)
             .expect("Failed to parse .defmt data: {e}")
@@ -131,7 +178,6 @@ impl RadarReader {
         let mut config_buffer = [0; 256];
         let mut config_line = Vec::with_capacity(128);
         let mut latest_host_command = None;
-        let mut last_host_command_sent_at: Option<Instant> = None;
         log::info!("Listening for logs on {}...", self.serial_port);
         log::info!(
             "Sending ESP trigger config on {}...",
@@ -142,8 +188,7 @@ impl RadarReader {
             loop {
                 match host_command_rx.try_recv() {
                     Ok(command) => {
-                        latest_host_command = Some(command);
-                        last_host_command_sent_at = None;
+                        latest_host_command = Some(HostConfig::new(&command));
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => return,
@@ -152,11 +197,11 @@ impl RadarReader {
 
             match config_port.read(&mut config_buffer) {
                 Ok(num_bytes) => {
-                    if process_config_response_bytes(&config_buffer[..num_bytes], &mut config_line)
-                    {
-                        latest_host_command = None;
-                        last_host_command_sent_at = None;
-                    }
+                    process_config_response_bytes(
+                        &config_buffer[..num_bytes],
+                        &mut config_line,
+                        &mut latest_host_command,
+                    );
                 }
                 Err(ref error)
                     if matches!(
@@ -169,14 +214,9 @@ impl RadarReader {
                 }
             }
 
-            if let Some(command) = latest_host_command.as_deref() {
-                let should_send = match last_host_command_sent_at {
-                    Some(sent_at) => sent_at.elapsed() >= HOST_COMMAND_RESEND_INTERVAL,
-                    None => true,
-                };
-
-                if should_send {
-                    if let Err(error) = config_port.write_all(command.as_bytes()) {
+            if let Some(config) = latest_host_command.as_mut() {
+                if config.should_send(Instant::now()) {
+                    if let Err(error) = config_port.write_all(config.command.as_bytes()) {
                         log::error!("Failed to write ESP config command: {error}");
                     } else if let Err(error) = config_port.flush() {
                         log::error!("Failed to flush ESP config command: {error}");
@@ -184,9 +224,9 @@ impl RadarReader {
                         log::info!(
                             "Sent ESP trigger config on {}: {}",
                             self.config_serial_port,
-                            command.trim_end()
+                            config.command.trim_end()
                         );
-                        last_host_command_sent_at = Some(Instant::now());
+                        config.last_sent = Some(Instant::now());
                     }
                 }
             }
@@ -203,10 +243,6 @@ impl RadarReader {
                         match stream_decoder.decode() {
                             Ok(frame) => {
                                 let log_message = frame.display_message().to_string();
-                                if log_message.starts_with("Trigger config updated:") {
-                                    latest_host_command = None;
-                                    last_host_command_sent_at = None;
-                                }
                                 self.radar_input.process_log_message(log_message);
                             }
                             Err(DecodeError::UnexpectedEof) => {
@@ -244,9 +280,11 @@ impl RadarReader {
     }
 }
 
-fn process_config_response_bytes(bytes: &[u8], line_buf: &mut Vec<u8>) -> bool {
-    let mut acknowledged = false;
-
+fn process_config_response_bytes(
+    bytes: &[u8],
+    line_buf: &mut Vec<u8>,
+    latest: &mut Option<HostConfig>,
+) {
     for byte in bytes {
         match *byte {
             b'\n' | b'\r' => {
@@ -256,9 +294,17 @@ fn process_config_response_bytes(bytes: &[u8], line_buf: &mut Vec<u8>) -> bool {
 
                 let line = String::from_utf8_lossy(line_buf).into_owned();
                 match line.as_str() {
-                    "CONFIG_OK" => {
-                        log::info!("ESP acknowledged trigger config");
-                        acknowledged = true;
+                    "CONFIG_READY" => {
+                        if let Some(config) = latest.as_mut() {
+                            config.request_refresh();
+                        }
+                    }
+                    line if line.starts_with("CONFIG_OK ") => {
+                        if let (Some(config), Ok(revision)) =
+                            (latest.as_mut(), line[10..].parse::<u64>())
+                        {
+                            config.acknowledge(revision);
+                        }
                     }
                     "CONFIG_ERR" => {
                         log::warn!("ESP rejected trigger config");
@@ -276,13 +322,12 @@ fn process_config_response_bytes(bytes: &[u8], line_buf: &mut Vec<u8>) -> bool {
             }
         }
     }
-
-    acknowledged
 }
 
-fn config_command(config: &RadarConfig) -> String {
+fn config_command(config: &RadarConfig, revision: u64) -> String {
     format!(
-        "CONFIG {} {} {} {} {} {}\n",
+        "CONFIG_V2 {} {} {} {} {} {} {}\n",
+        revision,
         config.authorized_speed,
         config.min_dist.round() as i64,
         config.max_dist.round() as i64,
@@ -329,37 +374,77 @@ mod tests {
         .expect("the serial worker must observe command channel shutdown");
     }
 
-    #[test]
-    fn formats_config_command_for_esp_trigger() {
-        let config = RadarConfig {
+    fn config() -> RadarConfig {
+        RadarConfig {
             authorized_speed: 42,
             min_dist: 1234.5,
             max_dist: 9876.5,
             trigger_cooldown: 1500,
             aperture_angle: 64,
             capture_paused: true,
-        };
-
-        assert_eq!(config_command(&config), "CONFIG 42 1235 9877 1500 64 1\n");
+        }
     }
 
     #[test]
-    fn config_ok_response_acknowledges_config() {
-        let mut line_buf = Vec::new();
-
-        assert!(!process_config_response_bytes(b"CONFIG", &mut line_buf));
-        assert!(process_config_response_bytes(b"_OK\n", &mut line_buf));
-        assert!(line_buf.is_empty());
+    fn formats_config_command_for_esp_trigger() {
+        assert_eq!(
+            config_command(&config(), 7),
+            "CONFIG_V2 7 42 1235 9877 1500 64 1\n"
+        );
     }
 
     #[test]
-    fn config_error_response_does_not_acknowledge_config() {
-        let mut line_buf = Vec::new();
+    fn only_the_current_sent_revision_can_be_acknowledged() {
+        let now = Instant::now();
+        let mut a = HostConfig::new(&config());
+        a.last_sent = Some(now);
+        let ack_a = format!("CONFIG_OK {}\n", a.revision);
+        let b = HostConfig::new(&config());
+        let ack_b = format!("CONFIG_OK {}\n", b.revision);
+        let mut latest = Some(b);
+        let mut line = vec![];
 
-        assert!(!process_config_response_bytes(
-            b"CONFIG_ERR\n",
-            &mut line_buf
-        ));
-        assert!(line_buf.is_empty());
+        // B arrives while A's acknowledgment is still in the serial buffer.
+        process_config_response_bytes(ack_a.as_bytes(), &mut line, &mut latest);
+        assert!(latest.as_ref().unwrap().should_send(now));
+        assert!(!latest.as_ref().unwrap().acknowledged);
+        // Even a matching response cannot acknowledge a command not yet sent.
+        process_config_response_bytes(ack_b.as_bytes(), &mut line, &mut latest);
+        assert!(!latest.as_ref().unwrap().acknowledged);
+
+        latest.as_mut().unwrap().last_sent = Some(now);
+        // Generic ACKs and old firmware logs are not protocol acknowledgments.
+        process_config_response_bytes(
+            b"CONFIG_OK\nTrigger config updated: paused=false\nCONFIG_ERR\n",
+            &mut line,
+            &mut latest,
+        );
+        assert!(!latest.as_ref().unwrap().acknowledged);
+        process_config_response_bytes(&ack_b.as_bytes()[..5], &mut line, &mut latest);
+        assert!(!latest.as_ref().unwrap().acknowledged);
+        process_config_response_bytes(&ack_b.as_bytes()[5..], &mut line, &mut latest);
+        assert!(latest.as_ref().unwrap().acknowledged);
+        assert!(!latest.as_ref().unwrap().should_send(now));
+        assert!(line.is_empty());
+    }
+
+    #[test]
+    fn current_config_is_retried_and_restored_after_esp_restart() {
+        let now = Instant::now();
+        let mut config = HostConfig::new(&config());
+        let command = config.command.clone();
+        config.last_sent = Some(now);
+        assert!(!config.should_send(now));
+        assert!(config.should_send(now + HOST_COMMAND_RESEND_INTERVAL));
+        assert!(config.acknowledge(config.revision));
+        assert!(!config.should_send(now + HOST_COMMAND_RESEND_INTERVAL));
+        assert!(config.should_send(now + HOST_COMMAND_REFRESH_INTERVAL));
+
+        let mut latest = Some(config);
+        process_config_response_bytes(b"CONFIG_READY\n", &mut vec![], &mut latest);
+        let config = latest.unwrap();
+        assert!(config.should_send(now));
+        assert!(!config.acknowledged);
+        assert_eq!(config.command, command);
     }
 }
