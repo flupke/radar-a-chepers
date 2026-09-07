@@ -157,6 +157,67 @@ USB to the camera is for `gphoto2` control/photo retrieval only. The camera stil
 
 When the camera battery is dead, continue radar-only debugging by pausing capture in the admin UI. Radar positions, uploader connection, ESP config ack, and capture-check logs can still be tested without taking photos.
 
+## Capture Recovery And Camera Time
+
+The Pi scans pending captures at startup and every 10 seconds, including while
+capture is paused. HTTP attempts time out after 30 seconds and camera commands
+after 60 seconds. Upload retries reuse a stable capture ID; deploy the web app
+before the uploader so repeated requests reuse the same photo and infraction.
+The web app also deduplicates identical requests from older uploaders. Reusing
+an ID with different photo or infraction data returns HTTP 409 for inspection.
+
+Camera photos are matched by EXIF capture time, rather than their download
+order. JPEGs need `DateTimeOriginal`; `SubSecTimeOriginal` improves precision and
+`OffsetTimeOriginal` supplies the timezone when present. Without an offset tag,
+the camera clock must use UTC. Synchronize it with the Pi before capture and
+check a controlled shot against the Pi's JSON `datetime_taken`: matching allows
+500 milliseconds of clock, shutter, and log delivery discrepancy beyond the
+EXIF timestamp precision. If several captures or photos fit the window, they
+remain unmatched. Cameras without subsecond timestamps may need a longer
+capture cooldown to avoid ambiguous matches.
+
+For the Nikon D3200, pause capture, wait for the ESP config acknowledgement,
+and exit any remote development session before initializing the clock:
+
+```sh
+ssh rshep.local 'set -e; sudo systemctl stop radar-uploader.service; trap "sudo systemctl start radar-uploader.service" EXIT; sudo env TZ=UTC gphoto2 --set-config /main/settings/datetime=now'
+```
+
+This command sets whole seconds; it is an initial synchronization, not proof of
+subsecond accuracy. Verify the controlled shot's offset before normal capture,
+and repeat this check after battery removal or clock changes.
+
+Pending `.json` files and their matched `.jpg` files stay in the infractions
+directory until upload succeeds. Success renames the metadata to `.uploaded`
+and keeps the photo. Retain these receipts: they prevent an old capture from
+being forgotten when deciding whether a later photo has a unique match.
+Camera originals remain in `camera-downloads/`; incomplete downloads are kept
+in `.incomplete-*` subdirectories and retried. Missing, invalid, ambiguous, or
+out-of-window EXIF timestamps leave the photo and metadata available for
+inspection instead of attaching a photo to another person's capture.
+
+The camera cache preserves full camera folder and file names so retries skip
+completed downloads even on Nikon devices that do not remember `--new` status.
+When replacing/reformatting the card or resetting camera file numbering, pause
+capture and stop the uploader, then archive the camera cache before restarting
+so reused camera paths can download again. Preserve the infractions directory's
+`.uploaded` receipts and any unmatched captures when doing this. Byte-identical
+copies with the same EXIF timestamp count as one photo, so preexisting flat
+downloads remain usable alongside the folder cache.
+
+The ESP still fires GPIO42. A received hardware trigger records its metadata
+even if the Pi has since received a new pause/filter setting or its own cooldown
+has not elapsed; the shutter has already fired. The fake uploader continues to
+apply those filters before simulating a capture.
+
+Software recovery checks, without hardware:
+
+```sh
+(cd web && mix test)
+(cd uploader && cargo test)
+python3 -m unittest discover -s scripts -p 'test_*.py'
+```
+
 ## RD03-D Raw Frame Test
 
 Use this when tracking disappears while someone runs through the radar field. Deploy the firmware, then follow the uploader logs while reproducing the dropout:

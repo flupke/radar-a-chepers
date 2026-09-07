@@ -2,6 +2,13 @@
 
 This is a standalone Rust application that watches for new photos in a directory and uploads them to the web server.
 
+Pending captures are retried at startup and every 10 seconds. Camera photos are
+matched using EXIF capture timestamps, so synchronize the camera clock with the
+Pi before use (UTC when EXIF has no timezone). Ambiguous matches remain pending.
+Keep the `.uploaded` metadata receipts and camera download cache when restarting
+the uploader. See [capture recovery and camera time](../docs/workflows.md#capture-recovery-and-camera-time)
+for clock verification, retry behavior, and cache reset after card changes.
+
 ## Configuration
 
 The uploader is configured via CLI flags:

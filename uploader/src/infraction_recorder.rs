@@ -2,6 +2,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, TimeDelta, Utc};
 use eyre::{Context, Result, eyre};
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Seek, SeekFrom, Write};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::{
@@ -292,15 +293,19 @@ impl InfractionRecorderInner {
 
     fn record_trigger(&mut self, trigger: RawTarget) -> Result<()> {
         let mut target_data = self.target_data(trigger, false);
-        target_data.triggered = target_data.would_trigger && !self.capture_paused;
+        // A hardware TRIGGER means the ESP has already fired the shutter.
+        // Reapplying filters with the Pi's receipt time can discard metadata
+        // for an actual photo after serial buffering or a config update.
+        target_data.triggered =
+            !self.test_mode || (target_data.would_trigger && !self.capture_paused);
         let _ = self.target_data_tx.send(target_data.clone());
 
-        if self.capture_paused {
+        if self.test_mode && self.capture_paused {
             log::info!("Capture paused: ESP trigger received, not downloading picture");
             return Ok(());
         }
 
-        if !target_data.would_trigger {
+        if self.test_mode && !target_data.would_trigger {
             log::info!("ESP trigger received, but server-side capture conditions no longer match");
             return Ok(());
         }
@@ -338,14 +343,21 @@ fn write_test_photo(photos_dir: &Utf8Path, infraction: &Infraction) -> Result<()
 }
 
 pub(crate) fn ensure_jpeg(photo_path: &Utf8Path) -> Result<()> {
-    let data = std::fs::read(photo_path)?;
-    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Ok(());
+    let mut file = std::fs::File::open(photo_path)?;
+    let mut signature = [0; 3];
+    let count = file.read(&mut signature)?;
+    if count == 3 && signature == [0xFF, 0xD8, 0xFF] && file.metadata()?.len() >= 5 {
+        let mut ending = [0; 2];
+        file.seek(SeekFrom::End(-2))?;
+        file.read_exact(&mut ending)?;
+        if ending == [0xFF, 0xD9] {
+            return Ok(());
+        }
     }
 
     Err(eyre!(
-        "captured file is not a JPEG: {photo_path}. Check camera imagequality; first bytes are {:#X?}",
-        &data[..data.len().min(8)]
+        "captured file is not a complete JPEG: {photo_path}. Check camera download/imagequality; first bytes are {:#X?}",
+        &signature[..count]
     ))
 }
 
@@ -421,7 +433,10 @@ impl Infraction {
 
     pub fn save_infraction_json(&self, photos_dir: &Utf8Path) -> Result<()> {
         let infraction_json = serde_json::to_string(self)?;
-        std::fs::write(self.infraction_path(photos_dir), infraction_json)?;
+        let mut pending = tempfile::NamedTempFile::new_in(photos_dir)?;
+        pending.write_all(infraction_json.as_bytes())?;
+        pending.as_file().sync_all()?;
+        pending.persist(self.infraction_path(photos_dir))?;
         Ok(())
     }
 }
@@ -484,10 +499,11 @@ mod tests {
         let photos_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).unwrap();
         let (target_data_tx, target_data_rx) = broadcast::channel(8);
         let (uploader_log_tx, uploader_log_rx) = broadcast::channel(8);
-        let uploader = InfractionUploader::new(
+        let uploader = InfractionUploader::new_with_photo_retrieval(
             photos_dir.clone(),
             "http://localhost".to_string(),
             "api-key".to_string(),
+            false,
         );
         let recorder = InfractionRecorder::new(
             authorized_speed,
@@ -724,7 +740,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn server_side_cooldown_still_guards_esp_triggers() {
+    async fn fake_triggers_still_obey_host_cooldown() {
         let local = tokio::task::LocalSet::new();
 
         local
@@ -741,6 +757,28 @@ mod tests {
                 assert!(!second_target.triggered);
                 assert!(!second_target.cooldown_elapsed);
                 assert_eq!(saved_infractions(&photos_dir).len(), 1);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn actual_esp_triggers_keep_metadata_despite_host_cooldown_or_config_changes() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (_temp_dir, photos_dir, mut recorder, mut target_data_rx) = test_recorder(4);
+                recorder.test_mode = false;
+                recorder.trigger_cooldown_ms = 30_000;
+                recorder.record_trigger(raw_target(150, 0, 100)).unwrap();
+                recorder.capture_paused = true;
+                recorder.min_dist = 1000.0;
+                recorder.authorized_speed = 100;
+                recorder.record_trigger(raw_target(200, 0, 100)).unwrap();
+                assert!(target_data_rx.try_recv().unwrap().triggered);
+                let second = target_data_rx.try_recv().unwrap();
+                assert!(second.triggered);
+                assert!(!second.cooldown_elapsed);
+                assert!(!second.would_trigger);
+                assert_eq!(saved_infractions(&photos_dir).len(), 2);
             })
             .await;
     }
